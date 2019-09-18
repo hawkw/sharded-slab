@@ -1,0 +1,23 @@
+[package]
+name = "sharded-slab"
+version = "0.0.1"
+authors = ["Eliza Weisman <eliza@buoyant.io>"]
+edition = "2018"
+
+license = "MIT"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[dependencies]
+lazy_static = "1"
+
+[dev-dependencies]
+loom = "0.2"
+proptest = "0.9.4"
+criterion = "0.3"
+slab = "0.4.2"
+
+[patch.crates-io]
+loom = { git = "https://github.com/carllerche/loom" }

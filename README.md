@@ -1,0 +1,141 @@
+# sharded-slab
+
+[![CI Status][ci-badge]][ci-url]
+[![GitHub License][license-badge]][license]
+
+[ci-badge]: https://github.com/hawkw/sharded-slab/workflows/CI/badge.svg
+[ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
+[license-badge]: https://img.shields.io/github/license/hawkw/sharded-slab
+[license]: LICENSE
+
+A lock-free concurrent slab.
+
+Slabs provide pre-allocated storage for many instances of a single data
+type. When a large number of values of a single type are required,
+this can be more efficient than allocating each item individually. Since the
+allocated items are the same size, memory fragmentation is reduced, and
+creating and removing new items can be very cheap.
+
+This crate implements a lock-free concurrent slab, indexed by `usize`s.
+
+## Usage
+
+First, add this to your `Cargo.toml`:
+
+```toml
+sharded-slab = "0.0.1"
+```
+
+### Examples
+
+Inserting an item into the slab, returning an index:
+
+```rust
+use sharded_slab::Slab;
+
+let slab = Slab::new();
+
+let key = slab.insert("hello world").unwrap();
+assert_eq!(slab.get(key), Some(&"hello world"));
+```
+
+To share a slab across threads, it may be wrapped in an `Arc`:
+
+```rust
+use sharded_slab::Slab;
+use std::sync::Arc;
+
+let slab = Arc::new(Slab::new());
+
+let slab2 = slab.clone();
+let thread2 = std::thread::spawn(move || {
+    let key = slab2.insert("hello from thread two").unwrap();
+    assert_eq!(slab2.get(key), Some(&"hello from thread two"));
+    key
+});
+
+let key1 = slab.insert("hello from thread one").unwrap();
+assert_eq!(slab.get(key1), Some(&"hello from thread one"));
+
+// Wait for thread 2 to complete.
+let key2 = thread2.join().unwrap();
+
+// The item inserted by thread 2 remains in the slab.
+assert_eq!(slab.get(key2), Some(&"hello from thread two"));
+```
+
+If items in the slab must be mutated, a `Mutex` or `RwLock` may be used for
+each item, providing granular locking of items rather than of the slab:
+
+```rust
+use sharded_slab::Slab;
+use std::sync::{Arc, Mutex};
+
+let slab = Arc::new(Slab::new());
+let key = slab.insert(Mutex::new(String::from("hello world"))).unwrap();
+
+let slab2 = slab.clone();
+std::thread::spawn(move || {
+    let mut hello = slab2.get(key).unwrap().lock().unwrap();
+    *hello = String::from("hello everyone!");
+}).join().unwrap();
+
+let hello = slab.get(key).unwrap().lock().unwrap();
+assert_eq!(hello.as_str(), "hello everyone!");
+```
+
+## Comparison with Similar Crates
+
+- [`slab`]: Carl Lerche's `slab` crate provides a slab implementation with a
+ similar API, implemented by storing all data in a single vector.
+
+ Unlike `sharded-slab`, inserting and removing elements from the slab
+ requires  mutable access. This means that if the slab is accessed
+ concurrently by multiple threads, it is necessary for it to be protected
+ by a `Mutex` or `RwLock`. Items may not be inserted or removed (or
+ accessed, if a `Mutex` is used) concurrently, even when they are
+ unrelated. In many cases, the lock can become a significant bottleneck. On
+ the other hand, this crate allows separate indices in the slab to be
+ accessed, inserted, and removed concurrently without requiring a global
+ lock. Therefore, when the slab is shared across multiple threads, this
+ crate offers significantly better performance than `slab`.
+
+ However, the lock free slab introduces some additional constant-factor
+ overhead. This means that in use-cases where a slab is _not_ shared by
+ multiple threads and locking is not required, this crate will likely offer
+ slightly worse performance.
+
+ In summary: `sharded-slab` offers significantly improved performance in
+ concurrent use-cases, while `slab` should be preferred in single-threaded
+ use-cases.
+
+[`slab`]: https://crates.io/crates/loom
+
+## Safety and Correctness
+
+Most implementations of lock-free data structures in Rust require some
+amount of unsafe code, and this crate is not an exception. In order to catch
+potential bugs in this unsafe code, we make use of [`loom`], a
+permutation-testing tool for concurrent Rust programs. All `unsafe` blocks
+this crate occur in accesses to `loom` `CausalCell`s. This means that when
+those accesses occur in this crate's tests, `loom` will assert that they are
+valid under the C11 memory model across multiple permutations of concurrent
+executions of those tests.
+
+In order to guard against the [ABA problem][aba], this crate makes use of
+_generational indices_. Each slot in the slab tracks a generation counter
+which is incremented every time a value is inserted into that slot, and the
+indices returned by `Slab::insert` include the generation of the slot when
+the value was inserted, packed into the high-order bits of the index. This
+ensures that if a value is inserted, removed,  and a new value is inserted
+into the same slot in the slab, the key returned by the first call to
+`insert` will not map to the new value.
+
+Since a fixed number of bits are set aside to use for storing the generation
+counter, the counter will wrap  around after being incremented a number of
+times. To avoid situations where a returned index lives long enough to see the
+generation counter wrap around to the same value, it is good to be fairly
+generous when configuring the allocation of index bits.
+
+[`loom`]: https://crates.io/crates/loom
+[aba]: https://en.wikipedia.org/wiki/ABA_problem
