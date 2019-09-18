@@ -1,4 +1,3 @@
-pub(crate) mod global;
 mod page;
 pub(crate) mod sync;
 mod tid;
@@ -7,47 +6,43 @@ pub(crate) use tid::Tid;
 use self::sync::CausalCell;
 use page::Page;
 
-#[cfg(target_pointer_width = "32")]
-pub(crate) mod consts {
-    //! Token bit allocation:
-    //! ```text
-    //!  gggg_gttt_ttti_iiio_oooo_oooo_oooo_oooo
-    //!  │     │      │    └─────────page offset
-    //!  │     │      └───────────────page index
-    //!  │     └───────────────────────thread id
-    //!  └────────────────────────────generation
-    //! ```
-    pub(crate) const POFF_MASK: usize = 0b1_1111_1111_1111_1111; // 17 bits
+/// Token bit allocation:
+/// ```text
+///
+/// 32-bit:
+///  rggg_gttt_ttti_iiio_oooo_oooo_oooo_oooo
+///   │    │      │    └─────────page offset
+///   │    │      └───────────────page index
+///   │    └───────────────────────thread id
+///   └───────────────────────────generation
+/// ```
+pub(crate) trait Pack: Sized {
+    const BITS: usize;
+    const LEN: usize;
+    const SHIFT: usize;
+    const MASK: usize = Self::BITS << Self::SHIFT;
 
-    pub(crate) const PIDX_MASK: usize = 0b1111 << PIDX_SHIFT; // 4 bits
-    pub(crate) const PIDX_SHIFT: usize = 17;
+    fn as_usize(&self) -> usize;
+    fn from_usize(val: usize) -> Self;
 
-    pub(crate) const TID_MASK: usize = 0x0011_1111 << TID_SHIFT; // 6 bits (max of 64 tids);
-    pub(crate) const TID_SHIFT: usize = PIDX_SHIFT + 4;
+    fn pack(&self, to: usize) -> usize {
+        let value = self.as_usize();
+        debug_assert!(value <= Self::BITS);
 
-    pub(crate) const GEN_MASK: usize = 0x0001_1111 << TID_SHIFT; // 5 bits
-    pub(crate) const GEN_SHIFT: usize = TID_SHIFT + 6;
-}
+        (to & !Self::MASK) | (value << Self::SHIFT)
+    }
 
-#[cfg(target_pointer_width = "64")]
-pub(crate) mod consts {
-    pub(crate) const POFF_MASK: usize = 0x3_FFFF_FFFF; // 34 bits
-
-    pub(crate) const PIDX_MASK: usize = 0x8 << PIDX_SHIFT; // 8 bits
-    pub(crate) const PIDX_SHIFT: usize = 34;
-
-    pub(crate) const TID_MASK: usize = 0x1111_1111_1111 << TID_SHIFT; // 12 bits (max of 4096 tids);
-    pub(crate) const TID_SHIFT: usize = PIDX_SHIFT + 8;
-
-    pub(crate) const GEN_MASK: usize = 0x0011_1111_1111 << TID_SHIFT; // 10 bits
-    pub(crate) const GEN_SHIFT: usize = TID_SHIFT + 12;
+    fn unpack(from: usize) -> Self {
+        let value = (from & Self::MASK) >> Self::SHIFT;
+        debug_assert!(value <= Self::BITS);
+        Self::from_usize(value)
+    }
 }
 
 pub struct Slab<T> {
     shards: Box<[CausalCell<Shard<T>>]>,
 }
 
-#[derive(Clone)]
 struct Shard<T> {
     tid: usize,
     pages: Vec<Page<T>>,
@@ -60,19 +55,38 @@ impl<T> Slab<T> {
         shards.resize_with(threads, || {
             let shard = Shard::new(idx);
             idx += 1;
-            shard
+            CausalCell::new(shard)
         });
         Self {
             shards: shards.into_boxed_slice(),
         }
     }
 
-    pub fn insert(&self, value: T) -> usize {
-        let tidx = Tid::current().as_usize();
-        self.shards[tidx].with_mut(|shard| unsafe {
+    pub fn insert(&self, value: T) -> Option<usize> {
+        let tid = Tid::current();
+        print!("insert {:?} ", tid);
+        self.shards[tid.as_usize()].with_mut(|shard| unsafe {
             // we are guaranteed to only mutate the shard while on its thread.
             (*shard).insert(value)
         })
+    }
+
+    pub fn remove(&self, idx: usize) {
+        let tid = Tid::unpack(idx);
+        if tid.is_current() {
+            self.shards[tid.as_usize()].with_mut(|shard| unsafe {
+                // only called if this is the current shard
+                (*shard).remove_local(idx)
+            })
+        } else {
+            self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).remove_remote(idx) })
+        }
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        let tid = Tid::unpack(idx);
+        print!("get {:?} ", tid);
+        self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).get(idx) })
     }
 }
 
@@ -84,34 +98,86 @@ impl<T> Shard<T> {
         }
     }
 
-    fn pack_idxs(&self, pidx: usize, poff: usize) -> usize {
-        debug_assert!(self.tid <= consts::TID_MASK);
-        debug_assert!(pidx <= consts::PIDX_MASK);
-        debug_assert!(poff <= consts::POFF_MASK);
-        (self.tid << consts::TID_SHIFT) | (pidx << consts::PIDX_SHIFT) | poff
-    }
-
     fn insert(&mut self, value: T) -> Option<usize> {
-        debug_assert!(Tid::current().as_usize() == self.tid);
+        debug_assert_eq!(Tid::current().as_usize(), self.tid);
 
         let mut value = Some(value);
-        for (pidx, mut page) in self.pages.iter_mut().enumerate() {
+        for (pidx, page) in self.pages.iter_mut().enumerate() {
+            print!("-> Index({:?}) ", pidx);
             if let Some(poff) = page.insert(&mut value) {
-                return Some(self.pack_idxs(pidx, poff));
+                return Some(page::Index::from_usize(pidx).pack(poff));
             }
         }
 
-        if self.pages.len() == consts::PIDX_MASK {
+        if self.pages.len() > page::Index::MASK {
             // out of pages!
             return None;
         }
 
         // get new page
         let pidx = self.pages.len();
-        let mut page = Page::new(32 * 2.pow(pidx));
+        let mut page = Page::new(32 * 2usize.pow(pidx as u32));
         let poff = page.insert(&mut value).expect("new page should be empty");
         self.pages.push(page);
 
-        Some(self.pack_idxs(pidx, poff))
+        Some(page::Index::from_usize(pidx).pack(poff))
+    }
+
+    fn get(&self, idx: usize) -> Option<&T> {
+        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
+        let pidx = page::Index::unpack(idx);
+        print!("-> {:?}", pidx);
+        self.pages[pidx.as_usize()].get(idx)
+    }
+
+    fn remove_local(&mut self, idx: usize) {
+        debug_assert_eq!(Tid::current().as_usize(), self.tid);
+        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
+
+        let pidx = page::Index::unpack(idx).as_usize();
+        self.pages[pidx].remove_local(idx)
+    }
+
+    fn remove_remote(&self, idx: usize) {
+        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
+
+        let pidx = page::Index::unpack(idx).as_usize();
+        self.pages[pidx].remove_remote(idx)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        page::{self, slot},
+        Pack, Tid,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn tid_roundtrips(tid in 0usize..Tid::BITS) {
+            let tid = Tid::from_usize(tid);
+            let packed = tid.pack(0);
+            assert_eq!(tid, Tid::unpack(packed));
+        }
+
+        #[test]
+        fn idx_roundtrips(
+            tid in 0usize..Tid::BITS,
+            gen in 0usize..slot::Generation::BITS,
+            pidx in 0usize..page::Index::BITS,
+            poff in 0usize..page::Offset::BITS,
+        ) {
+            let tid = Tid::from_usize(tid);
+            let gen = slot::Generation::from_usize(gen);
+            let pidx = page::Index::from_usize(pidx);
+            let poff = page::Offset::from_usize(poff);
+            let packed = tid.pack(gen.pack(pidx.pack(poff.pack(0))));
+            assert_eq!(poff, page::Offset::unpack(packed));
+            assert_eq!(pidx, page::Index::unpack(packed));
+            assert_eq!(gen, slot::Generation::unpack(packed));
+            assert_eq!(tid, Tid::unpack(packed));
+        }
     }
 }
