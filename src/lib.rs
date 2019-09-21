@@ -5,6 +5,7 @@ pub(crate) use tid::Tid;
 
 use self::sync::CausalCell;
 use page::Page;
+use std::ops;
 
 /// Token bit allocation:
 /// ```text
@@ -32,10 +33,34 @@ pub(crate) trait Pack: Sized {
         (to & !Self::MASK) | (value << Self::SHIFT)
     }
 
-    fn unpack(from: usize) -> Self {
+    fn from_packed(from: usize) -> Self {
         let value = (from & Self::MASK) >> Self::SHIFT;
         debug_assert!(value <= Self::BITS);
         Self::from_usize(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Builder {
+    threads: usize,
+    // pages: usize,
+    initial_page_sz: usize,
+}
+
+pub(crate) trait Unpack<T: Pack> {
+    fn unpack(self) -> T;
+}
+
+impl<T: Pack> Unpack<T> for usize {
+    #[inline(always)]
+    fn unpack(self) -> T {
+        T::from_packed(self)
+    }
+}
+impl<T: Pack> Unpack<T> for T {
+    #[inline(always)]
+    fn unpack(self) -> T {
+        self
     }
 }
 
@@ -68,11 +93,23 @@ struct Shard<T> {
 }
 
 impl<T> Slab<T> {
-    pub fn new(threads: usize) -> Self {
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+
+    pub fn new() -> Self {
+        Self::builder.finish()
+    }
+
+    fn from_builder(builder: Builder) -> Self {
+        let Builder {
+            threads,
+            initial_page_sz,
+        } = builder;
         let mut shards = Vec::with_capacity(threads);
         let mut idx = 0;
         shards.resize_with(threads, || {
-            let shard = Shard::new(idx);
+            let shard = Shard::new(idx, initial_page_sz);
             idx += 1;
             CausalCell::new(shard)
         });
@@ -83,15 +120,17 @@ impl<T> Slab<T> {
 
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::current();
-        print!("insert {:?} ", tid);
-        self.shards[tid.as_usize()].with_mut(|shard| unsafe {
-            // we are guaranteed to only mutate the shard while on its thread.
-            (*shard).insert(value)
-        })
+        // print!("insert {:?}", tid);
+        self.shards[tid.as_usize()]
+            .with_mut(|shard| unsafe {
+                // we are guaranteed to only mutate the shard while on its thread.
+                (*shard).insert(value)
+            })
+            .map(|idx| tid.pack(idx))
     }
 
     pub fn remove(&self, idx: usize) {
-        let tid = Tid::unpack(idx);
+        let tid: Tid = idx.unpack();
         if tid.is_current() {
             self.shards[tid.as_usize()].with_mut(|shard| unsafe {
                 // only called if this is the current shard
@@ -102,18 +141,54 @@ impl<T> Slab<T> {
         }
     }
 
+    #[inline]
     pub fn get(&self, idx: usize) -> Option<&T> {
-        let tid = Tid::unpack(idx);
-        print!("get {:?} ", tid);
+        let tid: Tid = idx.unpack();
+        // print!("get {:?}", tid);
         self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).get(idx) })
     }
 }
 
+impl Builder {
+    pub fn max_threads(self, threads: usize) -> Self {
+        assert!(threads <= Tid::BITS);
+        Self { threads, ..self }
+    }
+
+    // pub fn max_pages(self, pages: usize) -> Self {
+    //     assert!(pages <= page::Index::BITS);
+    //     Self { pages, ..self }
+    // }
+
+    pub fn initial_page_size(self, initial_page_sz: usize) -> Self {
+        assert!(initial_page_sz.is_power_of_two());
+        assert!(initial_page_sz <= page::Offset::BITS);
+
+        Self {
+            initial_page_sz,
+            ..self
+        }
+    }
+
+    pub fn finish<T>(self) -> Slab<T> {
+        Slab::from_builder(self)
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            initial_page_sz: 32,
+            max_threads: Tid::BITS,
+        }
+    }
+}
+
 impl<T> Shard<T> {
-    fn new(tid: usize) -> Self {
+    fn new(tid: usize, initial_page_sz: usize) -> Self {
         Self {
             tid,
-            pages: vec![Page::new(32)],
+            pages: vec![Page::new(initial_page_sz)],
         }
     }
 
@@ -122,7 +197,7 @@ impl<T> Shard<T> {
 
         let mut value = Some(value);
         for (pidx, page) in self.pages.iter_mut().enumerate() {
-            print!("-> Index({:?}) ", pidx);
+            // print!("-> Index({:?}) ", pidx);
             if let Some(poff) = page.insert(&mut value) {
                 return Some(page::Index::from_usize(pidx).pack(poff));
             }
@@ -143,25 +218,37 @@ impl<T> Shard<T> {
     }
 
     fn get(&self, idx: usize) -> Option<&T> {
-        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
-        let pidx = page::Index::unpack(idx);
-        print!("-> {:?}", pidx);
-        self.pages[pidx.as_usize()].get(idx)
+        debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
+        let pidx = page::Index::from_packed(idx);
+        // print!("-> {:?}", pidx);
+        self[pidx].get(idx)
     }
 
     fn remove_local(&mut self, idx: usize) {
         debug_assert_eq!(Tid::current().as_usize(), self.tid);
-        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
-
-        let pidx = page::Index::unpack(idx).as_usize();
-        self.pages[pidx].remove_local(idx)
+        debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
+        self[idx].remove_local(idx)
     }
 
     fn remove_remote(&self, idx: usize) {
-        debug_assert_eq!(Tid::unpack(idx).as_usize(), self.tid);
+        debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
+        debug_assert!(Tid::current().as_usize() != self.tid);
+        self[idx].remove_remote(idx)
+    }
+}
 
-        let pidx = page::Index::unpack(idx).as_usize();
-        self.pages[pidx].remove_remote(idx)
+impl<T, P: Unpack<page::Index>> ops::Index<P> for Shard<T> {
+    type Output = Page<T>;
+    #[inline]
+    fn index(&self, idx: P) -> &Self::Output {
+        &self.pages[idx.unpack().as_usize()]
+    }
+}
+
+impl<T, P: Unpack<page::Index>> ops::IndexMut<P> for Shard<T> {
+    #[inline]
+    fn index_mut(&mut self, idx: P) -> &mut Self::Output {
+        &mut self.pages[idx.unpack().as_usize()]
     }
 }
 
@@ -178,7 +265,7 @@ mod test {
         fn tid_roundtrips(tid in 0usize..Tid::BITS) {
             let tid = Tid::from_usize(tid);
             let packed = tid.pack(0);
-            assert_eq!(tid, Tid::unpack(packed));
+            assert_eq!(tid, Tid::from_packed(packed));
         }
 
         #[test]
@@ -193,10 +280,10 @@ mod test {
             let pidx = page::Index::from_usize(pidx);
             let poff = page::Offset::from_usize(poff);
             let packed = tid.pack(gen.pack(pidx.pack(poff.pack(0))));
-            assert_eq!(poff, page::Offset::unpack(packed));
-            assert_eq!(pidx, page::Index::unpack(packed));
-            assert_eq!(gen, slot::Generation::unpack(packed));
-            assert_eq!(tid, Tid::unpack(packed));
+            assert_eq!(poff, page::Offset::from_packed(packed));
+            assert_eq!(pidx, page::Index::from_packed(packed));
+            assert_eq!(gen, slot::Generation::from_packed(packed));
+            assert_eq!(tid, Tid::from_packed(packed));
         }
     }
 }

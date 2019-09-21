@@ -1,8 +1,10 @@
-use crate::{Pack, Tid};
+use crate::{Pack, Tid, Unpack};
 
 mod global;
 pub(crate) mod slot;
 use self::slot::Slot;
+use std::ops;
+// use std::ops::{Index, IndexMut};
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -62,7 +64,7 @@ impl Pack for Index {
     }
 }
 
-pub struct Page<T> {
+pub(crate) struct Page<T> {
     global: global::Stack,
     head: Offset,
     tail: Offset,
@@ -83,8 +85,8 @@ impl<T> Page<T> {
 
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
         let head = self.head;
-        println!("-> {:?}", head);
         if head.as_usize() <= self.slab.len() {
+            // print!("-> {:?}", head);
             // free slots remaining
             let slot = &mut self.slab[head.as_usize()];
             let gen = slot.insert(t);
@@ -97,18 +99,16 @@ impl<T> Page<T> {
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
-        let gen = slot::Generation::unpack(idx);
-        let off = Offset::unpack(idx);
-        println!("-> {:?}; {:?}", off, gen);
-        self.slab[off.as_usize()].get(gen)
+        let poff = Offset::from_packed(idx);
+        // print!("-> {:?}", poff);
+        self[poff].get(idx)
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) {
-        debug_assert_eq!(Tid::unpack(idx), Tid::current());
-        let offset = Offset::unpack(idx);
-        let gen = slot::Generation::unpack(idx);
+        debug_assert_eq!(Tid::from_packed(idx), Tid::current());
+        let offset = Offset::from_packed(idx);
 
-        self.slab[offset.0].remove(gen, self.head.as_usize());
+        self[offset].remove(idx, self.head.as_usize());
         self.head = offset;
 
         if self.tail == Offset::NULL {
@@ -117,7 +117,26 @@ impl<T> Page<T> {
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) {
-        unimplemented!()
+        debug_assert!(Tid::from_packed(idx) != Tid::current());
+        let offset = Offset::from_packed(idx);
+
+        let next = self.global.push(offset.as_usize());
+        self[offset].remove(idx, next);
+    }
+}
+
+impl<T, P: Unpack<Offset>> ops::Index<P> for Page<T> {
+    type Output = Slot<T>;
+    #[inline]
+    fn index(&self, idx: P) -> &Self::Output {
+        &self.slab[idx.unpack().as_usize()]
+    }
+}
+
+impl<T, P: Unpack<Offset>> ops::IndexMut<P> for Page<T> {
+    #[inline]
+    fn index_mut(&mut self, idx: P) -> &mut Self::Output {
+        &mut self.slab[idx.unpack().as_usize()]
     }
 }
 
@@ -132,21 +151,21 @@ mod test {
         fn pidx_roundtrips(pidx in 0usize..Index::BITS) {
             let pidx = Index::from_usize(pidx);
             let packed = pidx.pack(0);
-            assert_eq!(pidx, Index::unpack(packed));
+            assert_eq!(pidx, Index::from_packed(packed));
         }
 
         #[test]
         fn poff_roundtrips(poff in 0usize..Offset::BITS) {
             let poff = Offset::from_usize(poff);
             let packed = poff.pack(0);
-            assert_eq!(poff, Offset::unpack(packed));
+            assert_eq!(poff, Offset::from_packed(packed));
         }
 
         #[test]
         fn gen_roundtrips(gen in 0usize..slot::Generation::BITS) {
             let gen = slot::Generation::from_usize(gen);
             let packed = gen.pack(0);
-            assert_eq!(gen, slot::Generation::unpack(packed));
+            assert_eq!(gen, slot::Generation::from_packed(packed));
         }
 
         #[test]
@@ -159,9 +178,9 @@ mod test {
             let pidx = Index::from_usize(pidx);
             let poff = Offset::from_usize(poff);
             let packed = gen.pack(pidx.pack(poff.pack(0)));
-            assert_eq!(poff, Offset::unpack(packed));
-            assert_eq!(pidx, Index::unpack(packed));
-            assert_eq!(gen, slot::Generation::unpack(packed));
+            assert_eq!(poff, Offset::from_packed(packed));
+            assert_eq!(pidx, Index::from_packed(packed));
+            assert_eq!(gen, slot::Generation::from_packed(packed));
         }
     }
 }

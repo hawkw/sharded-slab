@@ -19,7 +19,7 @@ impl Stack {
         }
     }
 
-    pub(crate) fn push(&self, idx: usize) {
+    pub(crate) fn push(&self, idx: usize) -> usize {
         let idx = idx as u64;
         debug_assert!(idx <= std::u32::MAX as u64);
 
@@ -32,7 +32,7 @@ impl Stack {
                 idx
             };
             if self.state.compare_and_swap(curr, idx, Ordering::Release) == curr {
-                return;
+                return (curr >> 32) as usize;
             }
 
             spin_loop_hint();

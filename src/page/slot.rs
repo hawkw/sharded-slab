@@ -2,7 +2,7 @@ use crate::sync::{
     atomic::{AtomicUsize, Ordering},
     CausalCell,
 };
-use crate::{page, Pack, Tid};
+use crate::{page, Pack, Tid, Unpack};
 
 #[derive(Debug)]
 pub(crate) struct Slot<T> {
@@ -54,7 +54,10 @@ impl<T> Slot<T> {
             next: AtomicUsize::new(next),
         }
     }
-    pub(crate) fn get(&self, gen: Generation) -> Option<&T> {
+
+    pub(crate) fn get(&self, gen: impl Unpack<Generation>) -> Option<&T> {
+        let gen = gen.unpack();
+        // println!("-> {:?}", gen);
         if gen != self.gen {
             return None;
         }
@@ -67,14 +70,18 @@ impl<T> Slot<T> {
         self.item.with_mut(|item| unsafe {
             *item = value.take();
         });
-        self.gen.advance()
+
+        let gen = self.gen.advance();
+        // println!("-> {:?}", gen);
+        gen
     }
 
     pub(crate) fn next(&self) -> page::Offset {
         page::Offset::from_usize(self.next.load(Ordering::Acquire))
     }
 
-    pub(crate) fn remove(&self, gen: Generation, next: usize) {
+    pub(crate) fn remove(&self, gen: impl Unpack<Generation>, next: usize) {
+        let gen = gen.unpack();
         debug_assert!(gen == self.gen);
         if gen == self.gen {
             self.item.with_mut(|item| unsafe {

@@ -1,11 +1,11 @@
-use loom::sync::{Arc, Condvar, Mutex};
+use loom::sync::{Arc, Mutex};
 use loom::thread;
 use mislab::Slab;
 
 #[test]
 fn local_remove() {
     loom::model(|| {
-        let slab = Arc::new(Slab::new(4));
+        let slab = Arc::new(Slab::builder().with_max_threads(4).finish());
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
@@ -44,5 +44,40 @@ fn local_remove() {
 
         t1.join().expect("thread 1 should not panic");
         t2.join().expect("thread 2 should not panic");
+    });
+}
+
+#[test]
+fn remove_remote() {
+    loom::model(|| {
+        let slab = Arc::new(Slab::builder().with_max_threads(4).finish());
+
+        let idx1 = slab.insert(1).expect("insert");
+        assert_eq!(slab.get(idx1), Some(&1));
+
+        let idx2 = slab.insert(2).expect("insert");
+        assert_eq!(slab.get(idx2), Some(&2));
+
+        let idx3 = slab.insert(3).expect("insert");
+        assert_eq!(slab.get(idx3), Some(&3));
+
+        let s = slab.clone();
+        let t1 = thread::spawn(move || {
+            assert_eq!(s.get(idx2), Some(&2));
+            s.remove(idx2)
+        });
+
+        let s = slab.clone();
+        let t2 = thread::spawn(move || {
+            assert_eq!(s.get(idx3), Some(&3));
+            s.remove(idx3)
+        });
+
+        t1.join().expect("thread 1 should not panic");
+        t2.join().expect("thread 2 should not panic");
+
+        assert_eq!(slab.get(idx1), Some(&1));
+        assert_eq!(slab.get(idx2), None);
+        assert_eq!(slab.get(idx3), None);
     });
 }
