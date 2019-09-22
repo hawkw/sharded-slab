@@ -34,7 +34,7 @@ impl Pack for Offset {
 }
 
 impl Offset {
-    const NULL: Self = Self(std::usize::MAX);
+    const NULL: Self = Self(std::usize::MAX & Self::MASK);
 }
 
 #[repr(transparent)]
@@ -74,7 +74,8 @@ pub(crate) struct Page<T> {
 impl<T> Page<T> {
     pub(crate) fn new(size: usize) -> Self {
         let mut slab = Vec::with_capacity(size);
-        slab.extend((1..size + 1).map(Slot::new));
+        slab.extend((1..size).map(Slot::new));
+        slab.push(Slot::new(Offset::NULL.as_usize()));
         Self {
             global: global::Stack::new(),
             head: Offset::from_usize(0),
@@ -85,22 +86,27 @@ impl<T> Page<T> {
 
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
         let head = self.head;
+        #[cfg(test)]
+        print!("-> {:?}", head);
+
         if head.as_usize() <= self.slab.len() {
-            // print!("-> {:?}", head);
             // free slots remaining
             let slot = &mut self.slab[head.as_usize()];
-            let gen = slot.insert(t);
             let next = slot.next();
+            // free slots on local freelist
+            let gen = slot.insert(t);
             self.head = next;
             return Some(gen.pack(head.pack(0)));
         }
 
-        unimplemented!("pop global free list")
+        None
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
         let poff = Offset::from_packed(idx);
-        // print!("-> {:?}", poff);
+        #[cfg(test)]
+        print!("-> {:?}", poff);
+
         self[poff].get(idx)
     }
 

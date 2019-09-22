@@ -9,6 +9,7 @@ pub(crate) struct Slot<T> {
     gen: Generation,
     item: CausalCell<Option<T>>,
     next: AtomicUsize,
+    // is_free: bool,
 }
 
 #[repr(transparent)]
@@ -57,7 +58,8 @@ impl<T> Slot<T> {
 
     pub(crate) fn get(&self, gen: impl Unpack<Generation>) -> Option<&T> {
         let gen = gen.unpack();
-        // println!("-> {:?}", gen);
+        #[cfg(test)]
+        println!("-> {:?}", gen);
         if gen != self.gen {
             return None;
         }
@@ -72,7 +74,8 @@ impl<T> Slot<T> {
         });
 
         let gen = self.gen.advance();
-        // println!("-> {:?}", gen);
+        #[cfg(test)]
+        println!("-> {:?}", gen);
         gen
     }
 
