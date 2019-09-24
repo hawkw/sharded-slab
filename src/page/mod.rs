@@ -87,7 +87,7 @@ impl<T> Page<T> {
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
         let head = self.head;
         #[cfg(test)]
-        print!("-> {:?}", head);
+        println!("-> {:?}", head);
 
         if head.as_usize() <= self.slab.len() {
             // free slots remaining
@@ -105,7 +105,7 @@ impl<T> Page<T> {
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
         let poff = Offset::from_packed(idx);
         #[cfg(test)]
-        print!("-> {:?}", poff);
+        println!("-> {:?}", poff);
 
         self[poff].get(idx)
     }

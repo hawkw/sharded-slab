@@ -136,7 +136,7 @@ impl<T> Slab<T> {
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::current();
         #[cfg(test)]
-        print!("insert {:?}", tid);
+        println!("insert {:?}", tid);
         self.shards[tid.as_usize()]
             .with_mut(|shard| unsafe {
                 // we are guaranteed to only mutate the shard while on its thread.
@@ -148,7 +148,7 @@ impl<T> Slab<T> {
     pub fn remove(&self, idx: usize) {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
-        print!("rm {:?}", tid);
+        println!("rm {:?}", tid);
         if tid.is_current() {
             self.shards[tid.as_usize()].with_mut(|shard| unsafe {
                 // only called if this is the current shard
@@ -163,7 +163,7 @@ impl<T> Slab<T> {
     pub fn get(&self, idx: usize) -> Option<&T> {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
-        print!("get {:?}", tid);
+        println!("get {:?}", tid);
         self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).get(idx) })
     }
 }
@@ -228,7 +228,7 @@ impl<T> Shard<T> {
         let mut value = Some(value);
         for (pidx, page) in self.pages.iter_mut().enumerate() {
             #[cfg(test)]
-            print!("-> Index({:?}) ", pidx);
+            println!("-> Index({:?}) ", pidx);
             if let Some(poff) = page.insert(&mut value) {
                 return Some(page::Index::from_usize(pidx).pack(poff));
             }
@@ -237,7 +237,7 @@ impl<T> Shard<T> {
         let pidx = self.pages.len();
         if pidx >= self.max_pages {
             #[cfg(test)]
-            print!(
+            println!(
                 "max pages (len={}, max={})",
                 self.pages.len(),
                 self.max_pages
@@ -259,7 +259,7 @@ impl<T> Shard<T> {
         let pidx = page::Index::from_packed(idx);
 
         #[cfg(test)]
-        print!("-> {:?}", pidx);
+        println!("-> {:?}", pidx);
         self[pidx].get(idx)
     }
 
@@ -269,7 +269,7 @@ impl<T> Shard<T> {
         let pidx = page::Index::from_packed(idx);
 
         #[cfg(test)]
-        print!(" -> remove_local {:?}", pidx);
+        println!(" -> remove_local {:?}", pidx);
         self[pidx].remove_local(idx)
     }
 
@@ -279,7 +279,7 @@ impl<T> Shard<T> {
         let pidx = page::Index::from_packed(idx);
 
         #[cfg(test)]
-        print!(" -> remove_remote {:?}", pidx);
+        println!(" -> remove_remote {:?}", pidx);
         self[pidx].remove_remote(idx)
     }
 }
