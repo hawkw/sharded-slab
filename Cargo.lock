@@ -108,7 +108,7 @@ dependencies = [
 [[package]]
 name = "loom"
 version = "0.2.5"
-source = "git+https://github.com/hawkw/loom?branch=eliza/thread-local#f1d32c4c83af6d1d786c37b86137a3917118bfdb"
+source = "git+https://github.com/hawkw/loom?branch=eliza/thread-local#983366fb2719d42eb5abdeb3ccb93034a8eb507e"
 dependencies = [
  "cfg-if 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "generator 0.6.18 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -119,6 +119,7 @@ dependencies = [
 name = "mislab"
 version = "0.1.0"
 dependencies = [
+ "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "loom 0.2.5 (git+https://github.com/hawkw/loom?branch=eliza/thread-local)",
  "proptest 0.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

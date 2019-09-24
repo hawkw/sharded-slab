@@ -235,7 +235,7 @@ impl<T> Shard<T> {
         }
 
         let pidx = self.pages.len();
-        if pidx > self.max_pages {
+        if pidx >= self.max_pages {
             #[cfg(test)]
             print!(
                 "max pages (len={}, max={})",
