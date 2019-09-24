@@ -3,11 +3,11 @@ use crate::{Pack, Tid, Unpack};
 mod global;
 pub(crate) mod slot;
 use self::slot::Slot;
-use std::ops;
+use std::{fmt, ops};
 // use std::ops::{Index, IndexMut};
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) struct Offset(usize);
 
 impl Pack for Offset {
@@ -143,6 +143,18 @@ impl<T, P: Unpack<Offset>> ops::IndexMut<P> for Page<T> {
     #[inline]
     fn index_mut(&mut self, idx: P) -> &mut Self::Output {
         &mut self.slab[idx.unpack().as_usize()]
+    }
+}
+
+impl fmt::Debug for Offset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self == &Self::NULL {
+            f.debug_tuple("page::Offset")
+                .field(&format_args!("NULL"))
+                .finish()
+        } else {
+            f.debug_tuple("page::Offset").field(&self.0).finish()
+        }
     }
 }
 
