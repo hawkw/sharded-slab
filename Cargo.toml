@@ -9,3 +9,6 @@ edition = "2018"
 [dev-dependencies]
 loom = "0.2"
 proptest = "0.9.4"
+
+[patch.crates-io]
+loom = { git = "https://github.com/hawkw/loom", branch = "eliza/thread-local" }

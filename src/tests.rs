@@ -40,7 +40,7 @@ mod idx {
 #[test]
 fn local_remove() {
     loom::model(|| {
-        let slab = Arc::new(Slab::builder().max_threads(4).finish());
+        let slab = Arc::new(Slab::new());
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
@@ -85,7 +85,7 @@ fn local_remove() {
 #[test]
 fn remove_remote() {
     loom::model(|| {
-        let slab = Arc::new(Slab::builder().max_threads(4).finish());
+        let slab = Arc::new(Slab::new());
 
         let idx1 = slab.insert(1).expect("insert");
         assert_eq!(slab.get(idx1), Some(&1));
@@ -122,13 +122,7 @@ fn remove_remote_and_reuse() {
     // This doesn't work properly, since TIDs don't actually work on loom. Loom
     // needs to override thread IDs, or work with thread locals.
     loom::model(|| {
-        let slab = Arc::new(
-            Slab::builder()
-                .max_threads(4)
-                .max_pages(1)
-                .initial_page_size(4)
-                .finish(),
-        );
+        let slab = Arc::new(Slab::builder().max_pages(1).initial_page_size(4).finish());
 
         let idx1 = slab.insert(1).expect("insert");
         let idx2 = slab.insert(2).expect("insert");

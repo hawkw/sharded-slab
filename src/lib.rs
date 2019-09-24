@@ -1,3 +1,13 @@
+#[cfg(test)]
+macro_rules! thread_local {
+    ($($tts:tt)+) => { loom::thread_local!{ $($tts)+ } }
+}
+
+#[cfg(not(test))]
+macro_rules! thread_local {
+    ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
+}
+
 mod page;
 pub(crate) mod sync;
 mod tid;
