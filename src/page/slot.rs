@@ -83,8 +83,9 @@ impl<T> Slot<T> {
         page::Offset::from_usize(self.next.load(Ordering::Acquire))
     }
 
-    pub(crate) fn remove(&self, gen: impl Unpack<Generation>, next: usize) {
+    pub(crate) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) {
         let gen = gen.unpack();
+        let next = next.unpack().as_usize();
         debug_assert!(gen == self.gen);
         if gen == self.gen {
             self.item.with_mut(|item| unsafe {

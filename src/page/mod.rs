@@ -118,37 +118,43 @@ impl<T> Page<T> {
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) {
-        debug_assert_eq!(Tid::from_packed(idx), Tid::current());
+        debug_assert!(Tid::from_packed(idx).is_current());
         let offset = Offset::from_packed(idx);
 
         #[cfg(test)]
         println!("-> {:?}", offset);
 
-        self[offset].remove(idx, self.local_head.as_usize());
+        self[offset].remove(idx, self.local_head);
         self.local_head = offset;
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) {
         debug_assert!(Tid::from_packed(idx) != Tid::current());
         let offset = Offset::from_packed(idx);
+
         #[cfg(test)]
         println!("-> {:?}", offset);
-        let offset = offset.as_usize();
 
-        let mut next;
-        while {
-            next = self.remote_head.load(Ordering::Relaxed);
-            self.remote_head
-                .compare_and_swap(next, offset, Ordering::Release)
-                != next
-        } {
-            spin_loop_hint();
-        }
-
+        let next = self.push_remote(offset);
         #[cfg(test)]
         println!("-> next={:?}", next);
 
         self[offset].remove(idx, next);
+    }
+
+    #[inline]
+    fn push_remote(&self, offset: impl Unpack<Offset>) -> usize {
+        let offset = offset.unpack().as_usize();
+        loop {
+            let next = self.remote_head.load(Ordering::Relaxed);
+            let actual = self
+                .remote_head
+                .compare_and_swap(next, offset, Ordering::Release);
+            if actual == next {
+                return next;
+            }
+            spin_loop_hint();
+        }
     }
 }
 

@@ -269,7 +269,7 @@ impl<T> Shard<T> {
         let pidx = page::Index::from_packed(idx);
 
         #[cfg(test)]
-        println!(" -> remove_local {:?}", pidx);
+        println!("-> remove_local {:?}", pidx);
         self[pidx].remove_local(idx)
     }
 
@@ -279,7 +279,7 @@ impl<T> Shard<T> {
         let pidx = page::Index::from_packed(idx);
 
         #[cfg(test)]
-        println!(" -> remove_remote {:?}", pidx);
+        println!("-> remove_remote {:?}", pidx);
         self[pidx].remove_remote(idx)
     }
 }
