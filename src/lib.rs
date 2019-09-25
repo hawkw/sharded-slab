@@ -287,7 +287,7 @@ pub(crate) trait Pack: Sized {
         debug_assert!(value <= Self::BITS);
         Self::from_usize(value)
     }
-
+}
 
 pub(crate) trait Unpack<T: Pack> {
     fn unpack(self) -> T;
