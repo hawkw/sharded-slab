@@ -66,7 +66,8 @@ impl Tid {
     fn new_thread(local: &Cell<Option<Tid>>) -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
         let id = NEXT_ID.fetch_add(1, Ordering::AcqRel);
-        let tid = Self::from_usize(id);
+        // T_T hopefully the thread with tid 0 is dead by now...
+        let tid = Self::from_usize(id % Tid::BITS);
         local.set(Some(tid));
         tid
     }
