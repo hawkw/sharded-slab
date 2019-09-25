@@ -9,7 +9,6 @@ pub(crate) struct Slot<T> {
     gen: Generation,
     item: CausalCell<Option<T>>,
     next: AtomicUsize,
-    // is_free: bool,
 }
 
 #[repr(transparent)]

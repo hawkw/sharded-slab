@@ -66,7 +66,6 @@ impl Pack for Index {
 pub(crate) struct Page<T> {
     remote_head: AtomicUsize,
     local_head: Offset,
-    tail: Offset,
     slab: Box<[Slot<T>]>,
 }
 
@@ -78,7 +77,6 @@ impl<T> Page<T> {
         Self {
             remote_head: AtomicUsize::new(Offset::NULL.as_usize()),
             local_head: Offset::from_usize(0),
-            tail: Offset::NULL,
             slab: slab.into_boxed_slice(),
         }
     }

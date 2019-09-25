@@ -2,7 +2,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(test)]
 mod inner {
-    pub(crate) use loom::sync::{Arc, CausalCell};
+    pub(crate) use loom::sync::{CausalCell};
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -12,7 +12,7 @@ mod inner {
 #[cfg(not(test))]
 mod inner {
     use std::cell::UnsafeCell;
-    pub(crate) use std::sync::{atomic, Arc};
+    pub(crate) use std::sync::{atomic};
 
     #[derive(Debug)]
     pub struct CausalCell<T>(UnsafeCell<T>);

@@ -1,5 +1,5 @@
 use crate::Slab;
-use loom::sync::{Arc, Mutex};
+use loom::sync::{Arc};
 use loom::thread;
 
 mod idx {
