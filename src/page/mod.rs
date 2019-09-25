@@ -63,6 +63,7 @@ impl Pack for Index {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Page<T> {
     remote_head: AtomicUsize,
     local_head: Offset,
