@@ -17,37 +17,10 @@ use self::sync::CausalCell;
 use page::Page;
 use std::{marker::PhantomData, ops};
 
-/// Token bit allocation:
-/// ```text
-///
-/// 32-bit:
-///  rggg_gttt_ttti_iiio_oooo_oooo_oooo_oooo
-///   │    │      │    └─────────page offset
-///   │    │      └───────────────page index
-///   │    └───────────────────────thread id
-///   └───────────────────────────generation
-/// ```
-pub(crate) trait Pack: Sized {
-    const BITS: usize;
-    const LEN: usize;
-    const SHIFT: usize;
-    const MASK: usize = Self::BITS << Self::SHIFT;
-
-    fn as_usize(&self) -> usize;
-    fn from_usize(val: usize) -> Self;
-
-    fn pack(&self, to: usize) -> usize {
-        let value = self.as_usize();
-        debug_assert!(value <= Self::BITS);
-
-        (to & !Self::MASK) | (value << Self::SHIFT)
-    }
-
-    fn from_packed(from: usize) -> Self {
-        let value = (from & Self::MASK) >> Self::SHIFT;
-        debug_assert!(value <= Self::BITS);
-        Self::from_usize(value)
-    }
+/// A sharded slab.
+#[derive(Debug)]
+pub struct Slab<T> {
+    shards: Box<[CausalCell<Shard<T>>]>,
 }
 
 #[derive(Clone, Debug)]
@@ -58,27 +31,7 @@ pub struct Builder<T> {
     _t: PhantomData<fn(T)>,
 }
 
-pub(crate) trait Unpack<T: Pack> {
-    fn unpack(self) -> T;
-}
-
-impl<T: Pack> Unpack<T> for usize {
-    #[inline(always)]
-    fn unpack(self) -> T {
-        T::from_packed(self)
-    }
-}
-impl<T: Pack> Unpack<T> for T {
-    #[inline(always)]
-    fn unpack(self) -> T {
-        self
-    }
-}
-
-pub struct Slab<T> {
-    shards: Box<[CausalCell<Shard<T>>]>,
-}
-
+#[derive(Debug)]
 struct Shard<T> {
     tid: usize,
     max_pages: usize,
@@ -296,6 +249,60 @@ impl<T, P: Unpack<page::Index>> ops::IndexMut<P> for Shard<T> {
     #[inline]
     fn index_mut(&mut self, idx: P) -> &mut Self::Output {
         &mut self.pages[idx.unpack().as_usize()]
+    }
+}
+
+unsafe impl<T: Send> Send for Slab<T> {}
+unsafe impl<T: Sync> Sync for Slab<T> {}
+
+
+/// Token bit allocation:
+/// ```text
+///
+/// 32-bit:
+///  rggg_gttt_ttti_iiio_oooo_oooo_oooo_oooo
+///   │    │      │    └─────────page offset
+///   │    │      └───────────────page index
+///   │    └───────────────────────thread id
+///   └───────────────────────────generation
+/// ```
+pub(crate) trait Pack: Sized {
+    const BITS: usize;
+    const LEN: usize;
+    const SHIFT: usize;
+    const MASK: usize = Self::BITS << Self::SHIFT;
+
+    fn as_usize(&self) -> usize;
+    fn from_usize(val: usize) -> Self;
+
+    fn pack(&self, to: usize) -> usize {
+        let value = self.as_usize();
+        debug_assert!(value <= Self::BITS);
+
+        (to & !Self::MASK) | (value << Self::SHIFT)
+    }
+
+    fn from_packed(from: usize) -> Self {
+        let value = (from & Self::MASK) >> Self::SHIFT;
+        debug_assert!(value <= Self::BITS);
+        Self::from_usize(value)
+    }
+
+
+pub(crate) trait Unpack<T: Pack> {
+    fn unpack(self) -> T;
+}
+
+impl<T: Pack> Unpack<T> for usize {
+    #[inline(always)]
+    fn unpack(self) -> T {
+        T::from_packed(self)
+    }
+}
+impl<T: Pack> Unpack<T> for T {
+    #[inline(always)]
+    fn unpack(self) -> T {
+        self
     }
 }
 

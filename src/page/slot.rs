@@ -28,17 +28,20 @@ impl Pack for Generation {
 
     const SHIFT: usize = Tid::SHIFT + Tid::LEN;
 
+    #[inline(always)]
     fn from_usize(u: usize) -> Self {
         debug_assert!(u <= Self::BITS);
         Self(u)
     }
 
+    #[inline(always)]
     fn as_usize(&self) -> usize {
         self.0
     }
 }
 
 impl Generation {
+    #[inline]
     fn advance(&mut self) -> Self {
         self.0 = (self.0 + 1) % Self::BITS;
         debug_assert!(self.0 <= Self::BITS);
@@ -47,7 +50,7 @@ impl Generation {
 }
 
 impl<T> Slot<T> {
-    pub(crate) fn new(next: usize) -> Self {
+    pub(in crate::page) fn new(next: usize) -> Self {
         Self {
             gen: Generation(0),
             item: CausalCell::new(None),
@@ -55,10 +58,10 @@ impl<T> Slot<T> {
         }
     }
 
-    pub(crate) fn get(&self, gen: impl Unpack<Generation>) -> Option<&T> {
+    pub(in crate::page) fn get(&self, gen: impl Unpack<Generation>) -> Option<&T> {
         let gen = gen.unpack();
         #[cfg(test)]
-        println!("-> {:?}", gen);
+        println!("-> get {:?}; current={:?}", gen, self.gen);
         if gen != self.gen {
             return None;
         }
@@ -66,7 +69,8 @@ impl<T> Slot<T> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
-    pub(crate) fn insert(&mut self, value: &mut Option<T>) -> Generation {
+    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation {
+        debug_assert!(self.item.with(|item| unsafe { (*item).is_none() }), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
         self.item.with_mut(|item| unsafe {
             *item = value.take();
@@ -78,14 +82,18 @@ impl<T> Slot<T> {
         gen
     }
 
-    pub(crate) fn next(&self) -> page::Offset {
+    pub(in crate::page) fn next(&self) -> page::Offset {
         page::Offset::from_usize(self.next.load(Ordering::Acquire))
     }
 
-    pub(crate) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) {
+    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) {
         let gen = gen.unpack();
         let next = next.unpack().as_usize();
-        debug_assert!(gen == self.gen);
+
+        #[cfg(test)]
+        println!("-> remove={:?}; current={:?}", gen, self.gen);
+
+        debug_assert_eq!(gen, self.gen);
         if gen == self.gen {
             self.item.with_mut(|item| unsafe {
                 *item = None;
