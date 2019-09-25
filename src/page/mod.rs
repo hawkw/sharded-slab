@@ -1,10 +1,9 @@
+use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
 use crate::{Pack, Tid, Unpack};
 
-mod global;
 pub(crate) mod slot;
 use self::slot::Slot;
 use std::{fmt, ops};
-// use std::ops::{Index, IndexMut};
 
 #[repr(transparent)]
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -65,8 +64,8 @@ impl Pack for Index {
 }
 
 pub(crate) struct Page<T> {
-    global: global::Stack,
-    head: Offset,
+    remote_head: AtomicUsize,
+    local_head: Offset,
     tail: Offset,
     slab: Box<[Slot<T>]>,
 }
@@ -77,29 +76,37 @@ impl<T> Page<T> {
         slab.extend((1..size).map(Slot::new));
         slab.push(Slot::new(Offset::NULL.as_usize()));
         Self {
-            global: global::Stack::new(),
-            head: Offset::from_usize(0),
+            remote_head: AtomicUsize::new(Offset::NULL.as_usize()),
+            local_head: Offset::from_usize(0),
             tail: Offset::NULL,
             slab: slab.into_boxed_slice(),
         }
     }
 
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
-        let head = self.head;
+        let head = self.local_head;
         #[cfg(test)]
-        println!("-> {:?}", head);
+        println!("-> local {:?}", head);
+        let head = if head.as_usize() <= self.slab.len() {
+            head
+        } else {
+            let head = self
+                .remote_head
+                .swap(Offset::NULL.as_usize(), Ordering::Acquire);
+            let head = Offset::from_usize(head);
+            #[cfg(test)]
+            println!("-> remote {:?}", head);
+            head
+        };
 
-        if head.as_usize() <= self.slab.len() {
-            // free slots remaining
-            let slot = &mut self.slab[head.as_usize()];
-            let next = slot.next();
-            // free slots on local freelist
+        if head != Offset::NULL {
+            let slot = &mut self[head];
             let gen = slot.insert(t);
-            self.head = next;
-            return Some(gen.pack(head.pack(0)));
+            self.local_head = slot.next();
+            Some(gen.pack(head.pack(0)))
+        } else {
+            None
         }
-
-        None
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
@@ -114,19 +121,33 @@ impl<T> Page<T> {
         debug_assert_eq!(Tid::from_packed(idx), Tid::current());
         let offset = Offset::from_packed(idx);
 
-        self[offset].remove(idx, self.head.as_usize());
-        self.head = offset;
+        #[cfg(test)]
+        println!("-> {:?}", offset);
 
-        if self.tail == Offset::NULL {
-            self.tail = offset;
-        }
+        self[offset].remove(idx, self.local_head.as_usize());
+        self.local_head = offset;
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) {
         debug_assert!(Tid::from_packed(idx) != Tid::current());
         let offset = Offset::from_packed(idx);
+        #[cfg(test)]
+        println!("-> {:?}", offset);
+        let offset = offset.as_usize();
 
-        let next = self.global.push(offset.as_usize());
+        let mut next;
+        while {
+            next = self.remote_head.load(Ordering::Relaxed);
+            self.remote_head
+                .compare_and_swap(next, offset, Ordering::Release)
+                != next
+        } {
+            spin_loop_hint();
+        }
+
+        #[cfg(test)]
+        println!("-> next={:?}", next);
+
         self[offset].remove(idx, next);
     }
 }
