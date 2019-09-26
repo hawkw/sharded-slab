@@ -20,4 +20,4 @@ criterion = "0.3"
 slab = "0.4.2"
 
 [patch.crates-io]
-loom = { git = "https://github.com/hawkw/loom", branch = "eliza/thread-local" }
+loom = { git = "https://github.com/carllerche/loom" }
