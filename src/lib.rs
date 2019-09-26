@@ -132,7 +132,9 @@ impl<T> Slab<T> {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
         println!("get {:?}", tid);
-        self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).get(idx) })
+        self.shards
+            .get(tid.as_usize())?
+            .with(|shard| unsafe { (*shard).get(idx) })
     }
 }
 
@@ -228,7 +230,7 @@ impl<T> Shard<T> {
 
         #[cfg(test)]
         println!("-> {:?}", pidx);
-        self[pidx].get(idx)
+        self.pages.get(pidx.as_usize())?.get(idx)
     }
 
     fn remove_local(&mut self, idx: usize) -> Option<T> {
@@ -238,7 +240,7 @@ impl<T> Shard<T> {
 
         #[cfg(test)]
         println!("-> remove_local {:?}", pidx);
-        self[pidx].remove_local(idx)
+        self.pages.get_mut(pidx.as_usize())?.remove_local(idx)
     }
 
     fn remove_remote(&self, idx: usize) -> Option<T> {
@@ -248,7 +250,7 @@ impl<T> Shard<T> {
 
         #[cfg(test)]
         println!("-> remove_remote {:?}", pidx);
-        self[pidx].remove_remote(idx)
+        self.pages.get(pidx.as_usize())?.remove_remote(idx)
     }
 }
 

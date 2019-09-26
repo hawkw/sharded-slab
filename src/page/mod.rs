@@ -113,7 +113,7 @@ impl<T> Page<T> {
         #[cfg(test)]
         println!("-> {:?}", poff);
 
-        self[poff].get(idx)
+        self.slab.get(poff.as_usize())?.get(idx)
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) -> Option<T> {
@@ -123,7 +123,10 @@ impl<T> Page<T> {
         #[cfg(test)]
         println!("-> {:?}", offset);
 
-        let val = self[offset].remove(idx, self.local_head);
+        let val = self
+            .slab
+            .get(offset.as_usize())?
+            .remove(idx, self.local_head);
         self.local_head = offset;
         val
     }
@@ -139,7 +142,7 @@ impl<T> Page<T> {
         #[cfg(test)]
         println!("-> next={:?}", next);
 
-        self[offset].remove(idx, next)
+        self.slab.get(offset.as_usize())?.remove(idx, next)
     }
 
     #[inline]
