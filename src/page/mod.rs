@@ -116,18 +116,19 @@ impl<T> Page<T> {
         self[poff].get(idx)
     }
 
-    pub(crate) fn remove_local(&mut self, idx: usize) {
+    pub(crate) fn remove_local(&mut self, idx: usize) -> Option<T> {
         debug_assert!(Tid::from_packed(idx).is_current());
         let offset = Offset::from_packed(idx);
 
         #[cfg(test)]
         println!("-> {:?}", offset);
 
-        self[offset].remove(idx, self.local_head);
+        let val = self[offset].remove(idx, self.local_head);
         self.local_head = offset;
+        val
     }
 
-    pub(crate) fn remove_remote(&self, idx: usize) {
+    pub(crate) fn remove_remote(&self, idx: usize) -> Option<T> {
         debug_assert!(Tid::from_packed(idx) != Tid::current());
         let offset = Offset::from_packed(idx);
 
@@ -138,7 +139,7 @@ impl<T> Page<T> {
         #[cfg(test)]
         println!("-> next={:?}", next);
 
-        self[offset].remove(idx, next);
+        self[offset].remove(idx, next)
     }
 
     #[inline]

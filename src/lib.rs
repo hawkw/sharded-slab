@@ -98,7 +98,7 @@ impl<T> Slab<T> {
             .map(|idx| tid.pack(idx))
     }
 
-    pub fn remove(&self, idx: usize) {
+    pub fn remove(&self, idx: usize) -> Option<T> {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
         println!("rm {:?}", tid);
@@ -112,6 +112,21 @@ impl<T> Slab<T> {
         }
     }
 
+    /// Return a reference to the value associated with the given key.
+    ///
+    /// If the given key is not associated with a value, then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use mislab::Slab;
+    /// let slab = Slab::new();
+    /// let key = slab.insert("hello").unwrap();
+    ///
+    /// assert_eq!(slab.get(key), Some(&"hello"));
+    /// assert_eq!(slab.get(123), None);
+    /// ```
     #[inline]
     pub fn get(&self, idx: usize) -> Option<&T> {
         let tid: Tid = idx.unpack();
@@ -216,7 +231,7 @@ impl<T> Shard<T> {
         self[pidx].get(idx)
     }
 
-    fn remove_local(&mut self, idx: usize) {
+    fn remove_local(&mut self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::current().as_usize(), self.tid);
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
         let pidx = page::Index::from_packed(idx);
@@ -226,7 +241,7 @@ impl<T> Shard<T> {
         self[pidx].remove_local(idx)
     }
 
-    fn remove_remote(&self, idx: usize) {
+    fn remove_remote(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::current().as_usize() != self.tid);
         let pidx = page::Index::from_packed(idx);

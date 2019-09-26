@@ -86,7 +86,7 @@ impl<T> Slot<T> {
         page::Offset::from_usize(self.next.load(Ordering::Acquire))
     }
 
-    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) {
+    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) -> Option<T> {
         let gen = gen.unpack();
         let next = next.unpack().as_usize();
 
@@ -95,10 +95,15 @@ impl<T> Slot<T> {
 
         debug_assert_eq!(gen, self.gen);
         if gen == self.gen {
-            self.item.with_mut(|item| unsafe {
-                *item = None;
+            let val = self.item.with_mut(|item| unsafe {
+                (*item).take()
             });
+            debug_assert!(val.is_some());
+
             self.next.store(next, Ordering::Release);
+            val
+        } else {
+            None
         }
     }
 }
