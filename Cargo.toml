@@ -1,5 +1,5 @@
 [package]
-name = "mislab"
+name = "sharded-slab"
 version = "0.1.0"
 authors = ["hawkw <eliza@buoyant.io>"]
 edition = "2018"

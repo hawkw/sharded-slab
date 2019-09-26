@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::{
     sync::{Arc, Barrier, RwLock},
     thread,
@@ -44,11 +44,11 @@ fn insert_remove_local(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert_remove_local");
 
     for i in [100, 500, 1000, 5000, 10000].iter() {
-        group.bench_with_input(BenchmarkId::new("mislab", i), i, |b, &i| {
+        group.bench_with_input(BenchmarkId::new("sharded_slab", i), i, |b, &i| {
             b.iter_custom(|iters| {
                 let mut total = Duration::from_secs(0);
                 for _ in 0..iters {
-                    let bench = MultithreadedBench::new(Arc::new(mislab::Slab::new()));
+                    let bench = MultithreadedBench::new(Arc::new(sharded_slab::Slab::new()));
                     let elapsed = bench
                         .thread(move |start, slab| {
                             start.wait();
@@ -93,28 +93,32 @@ fn insert_remove_local(c: &mut Criterion) {
                     let elapsed = bench
                         .thread(move |start, slab| {
                             start.wait();
-                            let v: Vec<_> = (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
+                            let v: Vec<_> =
+                                (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
                                 slab.write().unwrap().remove(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
-                            let v: Vec<_> = (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
+                            let v: Vec<_> =
+                                (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
                                 slab.write().unwrap().remove(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
-                            let v:  Vec<_> = (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
+                            let v: Vec<_> =
+                                (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
                                 slab.write().unwrap().remove(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
-                            let v: Vec<_> = (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
+                            let v: Vec<_> =
+                                (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
                                 slab.write().unwrap().remove(i);
                             }

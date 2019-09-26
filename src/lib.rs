@@ -120,7 +120,7 @@ impl<T> Slab<T> {
     /// # Examples
     ///
     /// ```
-    /// # use mislab::Slab;
+    /// # use sharded_slab::Slab;
     /// let slab = Slab::new();
     /// let key = slab.insert("hello").unwrap();
     ///
@@ -269,7 +269,6 @@ impl<T, P: Unpack<page::Index>> ops::IndexMut<P> for Shard<T> {
 
 unsafe impl<T: Send> Send for Slab<T> {}
 unsafe impl<T: Sync> Sync for Slab<T> {}
-
 
 /// Token bit allocation:
 /// ```text
