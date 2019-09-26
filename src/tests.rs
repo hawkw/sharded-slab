@@ -119,8 +119,6 @@ fn remove_remote() {
 
 #[test]
 fn remove_remote_and_reuse() {
-    // This doesn't work properly, since TIDs don't actually work on loom. Loom
-    // needs to override thread IDs, or work with thread locals.
     loom::model(|| {
         let slab = Arc::new(Slab::builder().max_pages(1).initial_page_size(4).finish());
 
