@@ -70,7 +70,10 @@ impl<T> Slot<T> {
     }
 
     pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation {
-        debug_assert!(self.item.with(|item| unsafe { (*item).is_none() }), "inserted into full slot");
+        debug_assert!(
+            self.item.with(|item| unsafe { (*item).is_none() }),
+            "inserted into full slot"
+        );
         debug_assert!(value.is_some(), "inserted twice");
         self.item.with_mut(|item| unsafe {
             *item = value.take();
@@ -86,7 +89,11 @@ impl<T> Slot<T> {
         page::Offset::from_usize(self.next.load(Ordering::Acquire))
     }
 
-    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: impl Unpack<page::Offset>) -> Option<T> {
+    pub(in crate::page) fn remove(
+        &self,
+        gen: impl Unpack<Generation>,
+        next: impl Unpack<page::Offset>,
+    ) -> Option<T> {
         let gen = gen.unpack();
         let next = next.unpack().as_usize();
 
@@ -95,9 +102,7 @@ impl<T> Slot<T> {
 
         debug_assert_eq!(gen, self.gen);
         if gen == self.gen {
-            let val = self.item.with_mut(|item| unsafe {
-                (*item).take()
-            });
+            let val = self.item.with_mut(|item| unsafe { (*item).take() });
             debug_assert!(val.is_some());
 
             self.next.store(next, Ordering::Release);
