@@ -1,11 +1,16 @@
-use crate::sync::atomic::Ordering;
 use crate::{page, Pack};
-use std::sync::atomic::AtomicUsize;
 use std::{
     cell::{Cell, UnsafeCell},
+    collections::VecDeque,
     fmt,
     marker::PhantomData,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
 };
+
+use lazy_static::lazy_static;
 
 /// Uniquely identifies a thread.
 // #[repr(transparent)]
@@ -15,10 +20,25 @@ pub(crate) struct Tid {
     _not_send: PhantomData<UnsafeCell<()>>,
 }
 
-// === impl Tid ===
-thread_local! {
-    static MY_ID: Cell<Option<Tid>> = Cell::new(None);
+#[derive(Debug)]
+struct Registration(Cell<Option<Tid>>);
+
+struct Registry {
+    next: AtomicUsize,
+    free: Mutex<VecDeque<usize>>,
 }
+
+lazy_static! {
+    static ref REGISTRY: Registry = Registry {
+        next: AtomicUsize::new(0),
+        free: Mutex::new(VecDeque::new()),
+    };
+}
+thread_local! {
+    static REGISTRATION: Registration = Registration::new();
+}
+
+// === impl Tid ===
 
 impl Pack for Tid {
     #[cfg(target_pointer_width = "32")]
@@ -47,29 +67,17 @@ impl Pack for Tid {
 }
 
 impl Tid {
+    #[inline]
     pub(crate) fn current() -> Self {
-        MY_ID
-            .try_with(|my_id| my_id.get().unwrap_or_else(|| Self::new_thread(my_id)))
+        REGISTRATION
+            .try_with(Registration::current)
             .unwrap_or_else(|_| Self::poisoned())
     }
 
     pub(crate) fn is_current(&self) -> bool {
-        MY_ID
-            .try_with(|my_id| {
-                let curr = my_id.get().unwrap_or_else(|| Self::new_thread(my_id));
-                self == &curr
-            })
+        REGISTRATION
+            .try_with(|r| self == &r.current())
             .unwrap_or(false)
-    }
-
-    #[cold]
-    fn new_thread(local: &Cell<Option<Tid>>) -> Self {
-        static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
-        let id = NEXT_ID.fetch_add(1, Ordering::AcqRel);
-        // T_T hopefully the thread with tid 0 is dead by now...
-        let tid = Self::from_usize(id % Tid::BITS);
-        local.set(Some(tid));
-        tid
     }
 
     #[cold]
@@ -96,6 +104,49 @@ impl fmt::Debug for Tid {
             f.debug_tuple("Tid")
                 .field(&format_args!("{:#x}", self.id))
                 .finish()
+        }
+    }
+}
+
+// === impl Registration ===
+
+impl Registration {
+    fn new() -> Self {
+        Self(Cell::new(None))
+    }
+
+    fn current(&self) -> Tid {
+        if let Some(tid) = self.0.get() {
+            tid
+        } else {
+            self.register()
+        }
+    }
+
+    #[cold]
+    fn register(&self) -> Tid {
+        let id = REGISTRY
+            .free
+            .lock()
+            .ok()
+            .and_then(|mut free| free.pop_front())
+            .unwrap_or_else(|| REGISTRY.next.fetch_add(1, Ordering::Relaxed));
+        debug_assert!(id <= Tid::BITS, "thread ID overflow!");
+        let tid = Tid {
+            id,
+            _not_send: PhantomData,
+        };
+        self.0.set(Some(tid));
+        tid
+    }
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        if let Some(Tid { id, .. }) = self.0.get() {
+            if let Ok(mut free) = REGISTRY.free.lock() {
+                free.push_back(id);
+            }
         }
     }
 }
