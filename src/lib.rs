@@ -24,7 +24,6 @@ use std::{marker::PhantomData, ops};
 #[derive(Debug)]
 pub struct Slab<T> {
     shards: Box<[CausalCell<Shard<T>>]>,
-    len: AtomicUsize,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +39,7 @@ struct Shard<T> {
     tid: usize,
     max_pages: usize,
     initial_page_sz: usize,
+    len: AtomicUsize,
     // ┌─────────────┐      ┌────────┐
     // │ page 1      │      │        │
     // ├─────────────┤ ┌───▶│  next──┼─┐
@@ -87,7 +87,6 @@ impl<T> Slab<T> {
         });
         Self {
             shards: shards.into_boxed_slice(),
-            len: AtomicUsize::new(0),
         }
     }
 
@@ -101,10 +100,7 @@ impl<T> Slab<T> {
                 // we are guaranteed to only mutate the shard while on its thread.
                 (*shard).insert(value)
             })
-            .map(|idx| {
-                self.len.fetch_add(1, Ordering::Release);
-                tid.pack(idx)
-            })
+            .map(|idx| tid.pack(idx))
     }
 
     /// Removes the value associated with the given key from the slab, returning
@@ -116,18 +112,14 @@ impl<T> Slab<T> {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
         println!("rm {:?}", tid);
-        let item = if tid.is_current() {
+        if tid.is_current() {
             self.shards[tid.as_usize()].with_mut(|shard| unsafe {
                 // only called if this is the current shard
                 (*shard).remove_local(idx)
             })
         } else {
             self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).remove_remote(idx) })
-        };
-        if item.is_some() {
-            self.len.fetch_sub(1, Ordering::Release);
         }
-        item
     }
 
     /// Return a reference to the value associated with the given key.
@@ -171,7 +163,10 @@ impl<T> Slab<T> {
     }
 
     pub fn len(&self) -> usize {
-        self.len.load(Ordering::Acquire)
+        self.shards
+            .iter()
+            .map(|shard| shard.with(|shard| unsafe { (*shard).len() }))
+            .sum()
     }
 
     pub fn capacity(&self) -> usize {
@@ -236,6 +231,7 @@ impl<T> Shard<T> {
             tid,
             max_pages,
             initial_page_sz,
+            len: AtomicUsize::new(0),
             pages: vec![Page::new(initial_page_sz)],
         }
     }
@@ -288,7 +284,13 @@ impl<T> Shard<T> {
 
         #[cfg(test)]
         println!("-> remove_local {:?}", pidx);
-        self.pages.get_mut(pidx.as_usize())?.remove_local(idx)
+        self.pages
+            .get_mut(pidx.as_usize())?
+            .remove_local(idx)
+            .map(|item| {
+                self.len.fetch_sub(1, Ordering::Release);
+                item
+            })
     }
 
     fn remove_remote(&self, idx: usize) -> Option<T> {
@@ -298,7 +300,16 @@ impl<T> Shard<T> {
 
         #[cfg(test)]
         println!("-> remove_remote {:?}", pidx);
-        self.pages.get(pidx.as_usize())?.remove_remote(idx)
+        self.pages
+            .get(pidx.as_usize())?
+            .remove_remote(idx)
+            .map(|item| {
+                self.len.fetch_sub(1, Ordering::Release);
+                item
+            })
+    }
+
+    fn len(&self) -> usize {
     }
 
     fn total_capacity(&self) -> usize {
