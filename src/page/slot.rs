@@ -7,7 +7,6 @@ use crate::{page, Pack, Tid, Unpack};
 #[derive(Debug)]
 pub(crate) struct Slot<T> {
     gen: Generation,
-
     next: AtomicUsize,
     item: CausalCell<Option<T>>,
 }

@@ -63,10 +63,8 @@ impl Pack for Index {
     }
 }
 
-pub(crate) type Iter<'a, T> = std::iter::FilterMap<
-    std::slice::Iter<'a, Slot<T>>,
-    fn(&'a Slot<T>) -> Option<&'a T>,
->;
+pub(crate) type Iter<'a, T> =
+    std::iter::FilterMap<std::slice::Iter<'a, Slot<T>>, fn(&'a Slot<T>) -> Option<&'a T>>;
 
 #[derive(Debug)]
 pub(crate) struct Page<T> {
@@ -154,7 +152,9 @@ impl<T> Page<T> {
         self.slab.len()
     }
 
-    pub(crate) fn iter(&self) ->
+    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T> {
+        self.slab.iter().filter_map(Slot::value)
+    }
 
     #[inline]
     fn push_remote(&self, offset: impl Unpack<Offset>) -> usize {

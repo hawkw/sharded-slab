@@ -174,6 +174,18 @@ impl<T> Slab<T> {
         self.total_capacity() - self.len()
     }
 
+    pub fn unique_iter<'a>(&'a mut self) -> iter::UniqueIter<'a, T> {
+        let mut shards = self.shards.iter_mut();
+        let shard = shards.next().expect("must be at least 1 shard");
+        let mut pages = shard.with(|shard| unsafe { (*shard).iter() });
+        let slots = pages.next().expect("must be at least 1 page").iter();
+        iter::UniqueIter {
+            shards,
+            slots,
+            pages,
+        }
+    }
+
     fn total_capacity(&self) -> usize {
         self.shards
             .iter()
