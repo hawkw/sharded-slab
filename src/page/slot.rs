@@ -7,8 +7,9 @@ use crate::{page, Pack, Tid, Unpack};
 #[derive(Debug)]
 pub(crate) struct Slot<T> {
     gen: Generation,
-    item: CausalCell<Option<T>>,
+
     next: AtomicUsize,
+    item: CausalCell<Option<T>>,
 }
 
 #[repr(transparent)]
@@ -66,6 +67,10 @@ impl<T> Slot<T> {
             return None;
         }
 
+        self.value()
+    }
+
+    pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 

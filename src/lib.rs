@@ -12,6 +12,7 @@ mod page;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
+mod iter;
 
 use self::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -314,7 +315,11 @@ impl<T> Shard<T> {
     }
 
     fn total_capacity(&self) -> usize {
-        self.pages.iter().map(page::Page::total_capacity).sum()
+        self.iter().map(Page::total_capacity).sum()
+    }
+
+    fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T>> {
+        self.pages.iter()
     }
 }
 

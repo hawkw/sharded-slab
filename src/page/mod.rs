@@ -63,6 +63,11 @@ impl Pack for Index {
     }
 }
 
+pub(crate) type Iter<'a, T> = std::iter::FilterMap<
+    std::slice::Iter<'a, Slot<T>>,
+    fn(&'a Slot<T>) -> Option<&'a T>,
+>;
+
 #[derive(Debug)]
 pub(crate) struct Page<T> {
     remote_head: AtomicUsize,
@@ -148,6 +153,8 @@ impl<T> Page<T> {
     pub(crate) fn total_capacity(&self) -> usize {
         self.slab.len()
     }
+
+    pub(crate) fn iter(&self) ->
 
     #[inline]
     fn push_remote(&self, offset: impl Unpack<Offset>) -> usize {
