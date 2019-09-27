@@ -70,7 +70,7 @@ impl<T> Slab<T> {
         page::slot::Generation::MASK & Tid::MASK & page::Index::MASK & page::Offset::MASK;
 
     pub fn max_slots_per_shard(&self) -> usize {
-        self.initial_page_sz * 2usize.pow((page::Index::BITS - 1) as u32)
+        self.initial_page_sz * (2usize << (page::Index::BITS - 1))
     }
 
     pub fn builder() -> Builder<T> {
