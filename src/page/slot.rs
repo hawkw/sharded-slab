@@ -30,6 +30,7 @@ impl Pack for Generation {
 
     #[inline(always)]
     fn from_usize(u: usize) -> Self {
+        println!("Generation LEN={:?}", Self::SHIFT + Self::LEN);
         debug_assert!(u <= Self::BITS);
         Self(u)
     }

@@ -25,6 +25,7 @@ use std::{marker::PhantomData, ops};
 #[derive(Debug)]
 pub struct Slab<T> {
     shards: Box<[CausalCell<Shard<T>>]>,
+    initial_page_sz: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +69,10 @@ impl<T> Slab<T> {
     pub const MAX_KEY: usize =
         page::slot::Generation::MASK & Tid::MASK & page::Index::MASK & page::Offset::MASK;
 
+    pub fn max_slots_per_shard(&self) -> usize {
+        self.initial_page_sz * 2usize.pow((page::Index::BITS - 1) as u32)
+    }
+
     pub fn builder() -> Builder<T> {
         Builder::default()
     }
@@ -92,6 +97,7 @@ impl<T> Slab<T> {
         });
         Self {
             shards: shards.into_boxed_slice(),
+            initial_page_sz,
         }
     }
 
