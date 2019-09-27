@@ -20,7 +20,7 @@ impl Pack for Offset {
     #[cfg(target_pointer_width = "64")]
     const LEN: usize = 34;
 
-    const SHIFT: usize = 0;
+    type Prev = ();
 
     fn as_usize(&self) -> usize {
         self.0
@@ -51,7 +51,7 @@ impl Pack for Index {
     #[cfg(target_pointer_width = "64")]
     const LEN: usize = 8;
 
-    const SHIFT: usize = Offset::LEN;
+    type Prev = Offset;
 
     fn as_usize(&self) -> usize {
         self.0

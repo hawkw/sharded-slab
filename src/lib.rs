@@ -310,6 +310,7 @@ impl<T> Shard<T> {
     }
 
     fn len(&self) -> usize {
+        self.len.load(Ordering::Acquire)
     }
 
     fn total_capacity(&self) -> usize {
@@ -348,8 +349,10 @@ unsafe impl<T: Sync> Sync for Slab<T> {}
 pub(crate) trait Pack: Sized {
     const BITS: usize;
     const LEN: usize;
-    const SHIFT: usize;
+    const SHIFT: usize = Self::Prev::SHIFT + Self::Prev::LEN;
     const MASK: usize = Self::BITS << Self::SHIFT;
+
+    type Prev: Pack;
 
     fn as_usize(&self) -> usize;
     fn from_usize(val: usize) -> Self;
@@ -365,6 +368,30 @@ pub(crate) trait Pack: Sized {
         let value = (from & Self::MASK) >> Self::SHIFT;
         debug_assert!(value <= Self::BITS);
         Self::from_usize(value)
+    }
+}
+
+impl Pack for () {
+    const BITS: usize = 0;
+    const LEN: usize = 0;
+    const SHIFT: usize = 0;
+    const MASK: usize = 0;
+
+    type Prev = ();
+
+    fn as_usize(&self) -> usize {
+        unreachable!()
+    }
+    fn from_usize(val: usize) -> Self {
+        unreachable!()
+    }
+
+    fn pack(&self, to: usize) -> usize {
+        unreachable!()
+    }
+
+    fn from_packed(from: usize) -> Self {
+        unreachable!()
     }
 }
 

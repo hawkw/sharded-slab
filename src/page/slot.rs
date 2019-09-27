@@ -26,7 +26,7 @@ impl Pack for Generation {
     #[cfg(target_pointer_width = "64")]
     const LEN: usize = 8;
 
-    const SHIFT: usize = Tid::SHIFT + Tid::LEN;
+    type Prev = Tid;
 
     #[inline(always)]
     fn from_usize(u: usize) -> Self {
