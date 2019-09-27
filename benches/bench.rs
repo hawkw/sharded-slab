@@ -41,10 +41,15 @@ impl<T: Send + Sync + 'static> MultithreadedBench<T> {
 }
 
 fn insert_remove_local(c: &mut Criterion) {
+    // the 10000-insertion benchmark takes the `slab` crate about an hour to
+    // run; don't run this unless you're prepared for that...
+    // const N_INSERTIONS: &'static [usize] = &[100, 500, 1000, 5000, 10000];
+    const N_INSERTIONS: &'static [usize] = &[100, 300, 500, 700, 1000, 3000, 5000];
     let mut group = c.benchmark_group("insert_remove_local");
+    let g = group.measurement_time(Duration::from_secs(15));
 
-    for i in [100, 500, 1000, 5000, 10000].iter() {
-        group.bench_with_input(BenchmarkId::new("sharded_slab", i), i, |b, &i| {
+    for i in N_INSERTIONS {
+        g.bench_with_input(BenchmarkId::new("sharded_slab", i), i, |b, &i| {
             b.iter_custom(|iters| {
                 let mut total = Duration::from_secs(0);
                 for _ in 0..iters {
@@ -84,7 +89,7 @@ fn insert_remove_local(c: &mut Criterion) {
                 total
             })
         });
-        group.bench_with_input(BenchmarkId::new("slab_biglock", i), i, |b, &i| {
+        g.bench_with_input(BenchmarkId::new("slab_biglock", i), i, |b, &i| {
             b.iter_custom(|iters| {
                 let mut total = Duration::from_secs(0);
                 let i = i;
