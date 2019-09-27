@@ -125,12 +125,17 @@ impl Registration {
 
     #[cold]
     fn register(&self) -> Tid {
-        let id = REGISTRY
-            .free
-            .lock()
-            .ok()
-            .and_then(|mut free| free.pop_front())
-            .unwrap_or_else(|| REGISTRY.next.fetch_add(1, Ordering::Relaxed));
+        let next = REGISTRY.next.fetch_add(1, Ordering::AcqRel);
+        let id = if next >= Tid::BITS {
+            REGISTRY
+                .free
+                .lock()
+                .ok()
+                .and_then(|mut free| free.pop_front())
+                .expect("maximum thread IDs reached!")
+        } else {
+            next
+        };
         debug_assert!(id <= Tid::BITS, "thread ID overflow!");
         let tid = Tid {
             id,
@@ -145,6 +150,7 @@ impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(Tid { id, .. }) = self.0.get() {
             if let Ok(mut free) = REGISTRY.free.lock() {
+                println!("drop tid: {}", id);
                 free.push_back(id);
             }
         }
