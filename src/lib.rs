@@ -64,6 +64,9 @@ struct Shard<T> {
 }
 
 impl<T> Slab<T> {
+    pub const MAX_KEY: usize =
+        page::slot::Generation::MASK & Tid::MASK & page::Index::MASK & page::Offset::MASK;
+
     pub fn builder() -> Builder<T> {
         Builder::default()
     }
