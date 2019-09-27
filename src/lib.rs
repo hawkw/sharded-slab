@@ -152,10 +152,10 @@ impl<T> Slab<T> {
     /// ```
     /// let slab = sharded_slab::Slab::new();
     ///
-    /// let key = slab.insert("hello world");
+    /// let key = slab.insert("hello world").unwrap();
     /// assert!(slab.contains(key));
     ///
-    /// slab.remove(key);
+    /// slab.remove(key).unwrap();
     /// assert!(!slab.contains(key));
     /// ```
     pub fn contains(&self, key: usize) -> bool {
