@@ -145,6 +145,10 @@ impl<T> Page<T> {
         self.slab.get(offset.as_usize())?.remove(idx, next)
     }
 
+    pub(crate) fn total_capacity(&self) -> usize {
+        self.slab.len()
+    }
+
     #[inline]
     fn push_remote(&self, offset: impl Unpack<Offset>) -> usize {
         let offset = offset.unpack().as_usize();

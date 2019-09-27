@@ -13,7 +13,10 @@ pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
 
-use self::sync::CausalCell;
+use self::sync::{
+    atomic::{AtomicUsize, Ordering},
+    CausalCell,
+};
 use page::Page;
 use std::{marker::PhantomData, ops};
 
@@ -21,6 +24,7 @@ use std::{marker::PhantomData, ops};
 #[derive(Debug)]
 pub struct Slab<T> {
     shards: Box<[CausalCell<Shard<T>>]>,
+    len: AtomicUsize,
 }
 
 #[derive(Clone, Debug)]
@@ -83,9 +87,11 @@ impl<T> Slab<T> {
         });
         Self {
             shards: shards.into_boxed_slice(),
+            len: AtomicUsize::new(0),
         }
     }
 
+    /// Inserts
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::current();
         #[cfg(test)]
@@ -95,46 +101,88 @@ impl<T> Slab<T> {
                 // we are guaranteed to only mutate the shard while on its thread.
                 (*shard).insert(value)
             })
-            .map(|idx| tid.pack(idx))
+            .map(|idx| {
+                self.len.fetch_add(1, Ordering::Release);
+                tid.pack(idx)
+            })
     }
 
+    /// Removes the value associated with the given key from the slab, returning
+    /// it.
+    ///
+    /// If the slab does not contain a value for that key, `None` is returned
+    /// instead.
     pub fn remove(&self, idx: usize) -> Option<T> {
         let tid: Tid = idx.unpack();
         #[cfg(test)]
         println!("rm {:?}", tid);
-        if tid.is_current() {
+        let item = if tid.is_current() {
             self.shards[tid.as_usize()].with_mut(|shard| unsafe {
                 // only called if this is the current shard
                 (*shard).remove_local(idx)
             })
         } else {
             self.shards[tid.as_usize()].with(|shard| unsafe { (*shard).remove_remote(idx) })
+        };
+        if item.is_some() {
+            self.len.fetch_sub(1, Ordering::Release);
         }
+        item
     }
 
     /// Return a reference to the value associated with the given key.
     ///
-    /// If the given key is not associated with a value, then `None` is
-    /// returned.
+    /// If the slab does not contain a value for the given key, `None` is
+    /// returned instead.
     ///
     /// # Examples
     ///
     /// ```
-    /// # use sharded_slab::Slab;
-    /// let slab = Slab::new();
-    /// let key = slab.insert("hello").unwrap();
+    /// let slab = sharded_slab::Slab::new();
+    /// let key = slab.insert("hello world").unwrap();
     ///
-    /// assert_eq!(slab.get(key), Some(&"hello"));
-    /// assert_eq!(slab.get(123), None);
+    /// assert_eq!(slab.get(key), Some(&"hello world"));
+    /// assert_eq!(slab.get(12345), None);
     /// ```
-    #[inline]
-    pub fn get(&self, idx: usize) -> Option<&T> {
-        let tid: Tid = idx.unpack();
+    pub fn get(&self, key: usize) -> Option<&T> {
+        let tid: Tid = key.unpack();
         #[cfg(test)]
         println!("get {:?}", tid);
         self.shards
             .get(tid.as_usize())?
-            .with(|shard| unsafe { (*shard).get(idx) })
+            .with(|shard| unsafe { (*shard).get(key) })
+    }
+
+    /// Returns `true` if the slab contains a value for the given key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let slab = sharded_slab::Slab::new();
+    ///
+    /// let key = slab.insert("hello world");
+    /// assert!(slab.contains(key));
+    ///
+    /// slab.remove(key);
+    /// assert!(!slab.contains(key));
+    /// ```
+    pub fn contains(&self, key: usize) -> bool {
+        self.get(key).is_some()
+    }
+
+    pub fn len(&self) -> usize {
+        self.len.load(Ordering::Acquire)
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.total_capacity() - self.len()
+    }
+
+    fn total_capacity(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| shard.with(|shard| unsafe { (*shard).total_capacity() }))
+            .sum()
     }
 }
 
@@ -251,6 +299,10 @@ impl<T> Shard<T> {
         #[cfg(test)]
         println!("-> remove_remote {:?}", pidx);
         self.pages.get(pidx.as_usize())?.remove_remote(idx)
+    }
+
+    fn total_capacity(&self) -> usize {
+        self.pages.iter().map(page::Page::total_capacity).sum()
     }
 }
 
