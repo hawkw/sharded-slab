@@ -30,7 +30,6 @@ impl Pack for Generation {
 
     #[inline(always)]
     fn from_usize(u: usize) -> Self {
-        println!("Generation LEN={:?}", Self::SHIFT + Self::LEN);
         debug_assert!(u <= Self::BITS);
         Self(u)
     }
@@ -90,17 +89,12 @@ impl<T> Slot<T> {
         gen
     }
 
-    pub(in crate::page) fn next(&self) -> page::Offset {
-        page::Offset::from_usize(self.next.load(Ordering::Acquire))
+    pub(in crate::page) fn next(&self) -> usize {
+        self.next.load(Ordering::Acquire)
     }
 
-    pub(in crate::page) fn remove(
-        &self,
-        gen: impl Unpack<Generation>,
-        next: impl Unpack<page::Offset>,
-    ) -> Option<T> {
+    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: usize) -> Option<T> {
         let gen = gen.unpack();
-        let next = next.unpack().as_usize();
 
         #[cfg(test)]
         println!("-> remove={:?}; current={:?}", gen, self.gen);

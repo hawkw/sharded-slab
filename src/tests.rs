@@ -21,16 +21,13 @@ mod idx {
         fn idx_roundtrips(
             tid in 0usize..Tid::BITS,
             gen in 0usize..slot::Generation::BITS,
-            pidx in 0usize..page::Index::BITS,
-            poff in 0usize..page::Offset::BITS,
+            addr in 0usize..page::Addr::BITS,
         ) {
             let tid = Tid::from_usize(tid);
             let gen = slot::Generation::from_usize(gen);
-            let pidx = page::Index::from_usize(pidx);
-            let poff = page::Offset::from_usize(poff);
-            let packed = tid.pack(gen.pack(pidx.pack(poff.pack(0))));
-            assert_eq!(poff, page::Offset::from_packed(packed));
-            assert_eq!(pidx, page::Index::from_packed(packed));
+            let addr = page::Addr::from_usize(addr);
+            let packed = tid.pack(gen.pack(addr.pack(0)));
+            assert_eq!(addr, page::Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));
             assert_eq!(tid, Tid::from_packed(packed));
         }
@@ -185,3 +182,16 @@ fn unique_iter() {
         assert!(items.contains(&4), "items: {:?}", items);
     });
 }
+
+// #[test]
+// fn big() {
+//     let mut model = loom::model::Builder::new();
+//     model.max_branches = 4096;
+//     model.check(|| {
+//         let slab = Slab::new();
+//         for i in 0..4096 {
+//             let k = slab.insert(i).expect("insert");
+//             assert_eq!(slab.get(k).expect("get"), &i);
+//         }
+//     })
+// }

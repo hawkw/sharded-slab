@@ -41,6 +41,7 @@ struct Shard<T> {
     tid: usize,
     max_pages: usize,
     initial_page_sz: usize,
+    sz: usize,
     len: AtomicUsize,
     // ┌─────────────┐      ┌────────┐
     // │ page 1      │      │        │
@@ -68,10 +69,6 @@ impl<T> Slab<T> {
     pub const KEY_SHIFT: usize = page::slot::Generation::SHIFT + page::slot::Generation::LEN;
     pub const MAX_KEY: usize =
         page::slot::Generation::MASK & Tid::MASK & page::Index::MASK & page::Offset::MASK;
-
-    pub fn max_slots_per_shard(&self) -> usize {
-        self.initial_page_sz * (2usize << (page::Index::BITS - 1))
-    }
 
     pub fn builder() -> Builder<T> {
         Builder::default()
@@ -254,8 +251,9 @@ impl<T> Shard<T> {
             tid,
             max_pages,
             initial_page_sz,
+            sz: initial_page_sz,
             len: AtomicUsize::new(0),
-            pages: vec![Page::new(initial_page_sz)],
+            pages: vec![Page::new(initial_page_sz, 0)],
         }
     }
 
@@ -267,7 +265,7 @@ impl<T> Shard<T> {
             #[cfg(test)]
             println!("-> Index({:?}) ", pidx);
             if let Some(poff) = page.insert(&mut value) {
-                return Some(page::Index::from_usize(pidx).pack(poff));
+                return Some(poff);
             }
         }
 
@@ -282,33 +280,35 @@ impl<T> Shard<T> {
             // out of pages!
             return None;
         }
-
+        let sz = self.initial_page_sz * 2usize.pow(pidx as u32);
+        println!("new page; sz={:?}; prev_sz={:?}", sz, self.sz);
         // get new page
-        let mut page = Page::new(self.initial_page_sz * 2usize.pow(pidx as u32));
+        let mut page = Page::new(sz, self.sz);
+        self.sz += sz;
         let poff = page.insert(&mut value).expect("new page should be empty");
         self.pages.push(page);
 
-        Some(page::Index::from_usize(pidx).pack(poff))
+        Some(poff)
     }
 
     fn get(&self, idx: usize) -> Option<&T> {
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
-        let pidx = page::Index::from_packed(idx);
-
+        let addr = page::Addr::from_packed(idx);
+        let i = addr.index();
         #[cfg(test)]
-        println!("-> {:?}", pidx);
-        self.pages.get(pidx.as_usize())?.get(idx)
+        println!("-> {:?}; idx {:?}", addr, i);
+        self.pages.get(i)?.get(idx)
     }
 
     fn remove_local(&mut self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::current().as_usize(), self.tid);
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
-        let pidx = page::Index::from_packed(idx);
+        let addr = page::Addr::from_packed(idx);
 
         #[cfg(test)]
-        println!("-> remove_local {:?}", pidx);
+        println!("-> remove_local {:?}", addr);
         self.pages
-            .get_mut(pidx.as_usize())?
+            .get_mut(addr.index())?
             .remove_local(idx)
             .map(|item| {
                 self.len.fetch_sub(1, Ordering::Release);
@@ -319,12 +319,12 @@ impl<T> Shard<T> {
     fn remove_remote(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::current().as_usize() != self.tid);
-        let pidx = page::Index::from_packed(idx);
+        let addr = page::Addr::from_packed(idx);
 
         #[cfg(test)]
-        println!("-> remove_remote {:?}", pidx);
+        println!("-> remove_remote {:?}", addr);
         self.pages
-            .get(pidx.as_usize())?
+            .get(addr.index())?
             .remove_remote(idx)
             .map(|item| {
                 self.len.fetch_sub(1, Ordering::Release);
@@ -342,21 +342,6 @@ impl<T> Shard<T> {
 
     fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T>> {
         self.pages.iter()
-    }
-}
-
-impl<T, P: Unpack<page::Index>> ops::Index<P> for Shard<T> {
-    type Output = Page<T>;
-    #[inline]
-    fn index(&self, idx: P) -> &Self::Output {
-        &self.pages[idx.unpack().as_usize()]
-    }
-}
-
-impl<T, P: Unpack<page::Index>> ops::IndexMut<P> for Shard<T> {
-    #[inline]
-    fn index_mut(&mut self, idx: P) -> &mut Self::Output {
-        &mut self.pages[idx.unpack().as_usize()]
     }
 }
 

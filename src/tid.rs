@@ -51,7 +51,7 @@ impl Pack for Tid {
     #[cfg(target_pointer_width = "64")]
     const LEN: usize = 12;
 
-    type Prev = page::Index;
+    type Prev = page::Addr;
 
     fn as_usize(&self) -> usize {
         self.id

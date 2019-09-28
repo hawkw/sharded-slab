@@ -32,10 +32,6 @@ impl Pack for Offset {
     }
 }
 
-impl Offset {
-    const NULL: Self = Self(std::usize::MAX & Self::MASK);
-}
-
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) struct Index(usize);
@@ -63,24 +59,69 @@ impl Pack for Index {
     }
 }
 
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) struct Addr(usize);
+
+impl Addr {
+    const NULL: usize = Self::BITS + 1;
+
+    pub(crate) fn index(&self) -> usize {
+        if self.0 < 32 {
+            0
+        } else {
+            64 - (self.0 + 32 >> 6).leading_zeros() as usize
+        }
+    }
+
+    pub(crate) const fn offset(&self) -> usize {
+        self.0
+    }
+}
+
+impl Pack for Addr {
+    #[cfg(target_pointer_width = "32")]
+    const LEN: usize = 16;
+    #[cfg(target_pointer_width = "64")]
+    const LEN: usize = 32;
+
+    #[cfg(target_pointer_width = "32")]
+    const BITS: usize = 0xFFFF;
+    #[cfg(target_pointer_width = "64")]
+    const BITS: usize = 0xFFFF_FFFF;
+
+    type Prev = ();
+
+    fn as_usize(&self) -> usize {
+        self.0
+    }
+
+    fn from_usize(val: usize) -> Self {
+        debug_assert!(val <= Self::BITS);
+        Self(val)
+    }
+}
+
 pub(crate) type Iter<'a, T> =
     std::iter::FilterMap<std::slice::Iter<'a, Slot<T>>, fn(&'a Slot<T>) -> Option<&'a T>>;
 
 #[derive(Debug)]
 pub(crate) struct Page<T> {
+    prev_sz: usize,
     remote_head: AtomicUsize,
-    local_head: Offset,
+    local_head: usize,
     slab: Box<[Slot<T>]>,
 }
 
 impl<T> Page<T> {
-    pub(crate) fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
         let mut slab = Vec::with_capacity(size);
         slab.extend((1..size).map(Slot::new));
-        slab.push(Slot::new(Offset::NULL.as_usize()));
+        slab.push(Slot::new(Addr::NULL));
         Self {
-            remote_head: AtomicUsize::new(Offset::NULL.as_usize()),
-            local_head: Offset::from_usize(0),
+            prev_sz,
+            remote_head: AtomicUsize::new(Addr::NULL),
+            local_head: 0,
             slab: slab.into_boxed_slice(),
         }
     }
@@ -88,64 +129,61 @@ impl<T> Page<T> {
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
         let head = self.local_head;
         #[cfg(test)]
-        println!("-> local {:?}", head);
-        let head = if head.as_usize() <= self.slab.len() {
+        println!("-> local head {:?}", head);
+        let head = if head < self.slab.len() {
             head
         } else {
-            let head = self
-                .remote_head
-                .swap(Offset::NULL.as_usize(), Ordering::Acquire);
-            let head = Offset::from_usize(head);
+            let head = self.remote_head.swap(Addr::NULL, Ordering::Acquire);
             #[cfg(test)]
-            println!("-> remote {:?}", head);
+            println!("-> remote head {:?}", head);
             head
         };
 
-        if head != Offset::NULL {
-            let slot = &mut self[head];
+        if head != Addr::NULL {
+            let slot = &mut self.slab[head];
             let gen = slot.insert(t);
             self.local_head = slot.next();
-            Some(gen.pack(head.pack(0)))
+            let index = head + self.prev_sz;
+            #[cfg(test)]
+            println!("insert at offset: {}", index);
+            Some(gen.pack(head + self.prev_sz))
         } else {
             None
         }
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
-        let poff = Offset::from_packed(idx);
+        let poff = Addr::from_packed(idx).offset() - self.prev_sz;
         #[cfg(test)]
-        println!("-> {:?}", poff);
+        println!("-> offset {:?}", poff);
 
-        self.slab.get(poff.as_usize())?.get(idx)
+        self.slab.get(poff)?.get(idx)
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) -> Option<T> {
         debug_assert!(Tid::from_packed(idx).is_current());
-        let offset = Offset::from_packed(idx);
+        let offset = Addr::from_packed(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
-        println!("-> {:?}", offset);
+        println!("-> offset {:?}", offset);
 
-        let val = self
-            .slab
-            .get(offset.as_usize())?
-            .remove(idx, self.local_head);
+        let val = self.slab.get(offset)?.remove(idx, self.local_head);
         self.local_head = offset;
         val
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) -> Option<T> {
         debug_assert!(Tid::from_packed(idx) != Tid::current());
-        let offset = Offset::from_packed(idx);
+        let offset = Addr::from_packed(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
-        println!("-> {:?}", offset);
+        println!("-> offset {:?}", offset);
 
         let next = self.push_remote(offset);
         #[cfg(test)]
         println!("-> next={:?}", next);
 
-        self.slab.get(offset.as_usize())?.remove(idx, next)
+        self.slab.get(offset)?.remove(idx, next)
     }
 
     pub(crate) fn total_capacity(&self) -> usize {
@@ -157,8 +195,7 @@ impl<T> Page<T> {
     }
 
     #[inline]
-    fn push_remote(&self, offset: impl Unpack<Offset>) -> usize {
-        let offset = offset.unpack().as_usize();
+    fn push_remote(&self, offset: usize) -> usize {
         loop {
             let next = self.remote_head.load(Ordering::Relaxed);
             let actual = self
@@ -172,32 +209,32 @@ impl<T> Page<T> {
     }
 }
 
-impl<T, P: Unpack<Offset>> ops::Index<P> for Page<T> {
-    type Output = Slot<T>;
-    #[inline]
-    fn index(&self, idx: P) -> &Self::Output {
-        &self.slab[idx.unpack().as_usize()]
-    }
-}
+// impl<T, P: Unpack<Offset>> ops::Index<P> for Page<T> {
+//     type Output = Slot<T>;
+//     #[inline]
+//     fn index(&self, idx: P) -> &Self::Output {
+//         &self.slab[idx.unpack().as_usize()]
+//     }
+// }
 
-impl<T, P: Unpack<Offset>> ops::IndexMut<P> for Page<T> {
-    #[inline]
-    fn index_mut(&mut self, idx: P) -> &mut Self::Output {
-        &mut self.slab[idx.unpack().as_usize()]
-    }
-}
+// impl<T, P: Unpack<Offset>> ops::IndexMut<P> for Page<T> {
+//     #[inline]
+//     fn index_mut(&mut self, idx: P) -> &mut Self::Output {
+//         &mut self.slab[idx.unpack().as_usize()]
+//     }
+// }
 
-impl fmt::Debug for Offset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self == &Self::NULL {
-            f.debug_tuple("page::Offset")
-                .field(&format_args!("NULL"))
-                .finish()
-        } else {
-            f.debug_tuple("page::Offset").field(&self.0).finish()
-        }
-    }
-}
+// impl fmt::Debug for Offset {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         if self == &Self::NULL {
+//             f.debug_tuple("page::Offset")
+//                 .field(&format_args!("NULL"))
+//                 .finish()
+//         } else {
+//             f.debug_tuple("page::Offset").field(&self.0).finish()
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod test {
@@ -207,19 +244,11 @@ mod test {
 
     proptest! {
         #[test]
-        fn pidx_roundtrips(pidx in 0usize..Index::BITS) {
-            let pidx = Index::from_usize(pidx);
-            let packed = pidx.pack(0);
-            assert_eq!(pidx, Index::from_packed(packed));
+        fn addr_roundtrips(pidx in 0usize..Index::BITS) {
+            let addr = Addr::from_usize(pidx);
+            let packed = addr.pack(0);
+            assert_eq!(addr, Addr::from_packed(packed));
         }
-
-        #[test]
-        fn poff_roundtrips(poff in 0usize..Offset::BITS) {
-            let poff = Offset::from_usize(poff);
-            let packed = poff.pack(0);
-            assert_eq!(poff, Offset::from_packed(packed));
-        }
-
         #[test]
         fn gen_roundtrips(gen in 0usize..slot::Generation::BITS) {
             let gen = slot::Generation::from_usize(gen);
@@ -230,15 +259,12 @@ mod test {
         #[test]
         fn page_roundtrips(
             gen in 0usize..slot::Generation::BITS,
-            pidx in 0usize..Index::BITS,
-            poff in 0usize..Offset::BITS,
+            addr in 0usize..Addr::BITS,
         ) {
             let gen = slot::Generation::from_usize(gen);
-            let pidx = Index::from_usize(pidx);
-            let poff = Offset::from_usize(poff);
-            let packed = gen.pack(pidx.pack(poff.pack(0)));
-            assert_eq!(poff, Offset::from_packed(packed));
-            assert_eq!(pidx, Index::from_packed(packed));
+            let addr = Addr::from_usize(addr);
+            let packed = gen.pack(addr.pack(0));
+            assert_eq!(addr, Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));
         }
     }
