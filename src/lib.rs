@@ -66,9 +66,9 @@ struct Shard<T> {
 }
 
 impl<T> Slab<T> {
-    pub const KEY_SHIFT: usize = page::slot::Generation::SHIFT + page::slot::Generation::LEN;
-    pub const MAX_KEY: usize =
-        page::slot::Generation::MASK & Tid::MASK & page::Index::MASK & page::Offset::MASK;
+    pub const MAX_PER_SHARD: usize = page::Addr::BITS;
+    pub const MAX_SHARDS: usize = Tid::BITS;
+    pub const HIGHEST_BIT: usize = page::slot::Generation::SHIFT + page::slot::Generation::LEN;
 
     pub fn builder() -> Builder<T> {
         Builder::default()
