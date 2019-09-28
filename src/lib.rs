@@ -294,7 +294,7 @@ impl<T> Shard<T> {
     fn get(&self, idx: usize) -> Option<&T> {
         debug_assert_eq!(Tid::from_packed(idx).as_usize(), self.tid);
         let addr = page::Addr::from_packed(idx);
-        let i = addr.index();
+        let i = addr.index(self.initial_page_sz);
         #[cfg(test)]
         println!("-> {:?}; idx {:?}", addr, i);
         self.pages.get(i)?.get(idx)
@@ -308,7 +308,7 @@ impl<T> Shard<T> {
         #[cfg(test)]
         println!("-> remove_local {:?}", addr);
         self.pages
-            .get_mut(addr.index())?
+            .get_mut(addr.index(self.initial_page_sz))?
             .remove_local(idx)
             .map(|item| {
                 self.len.fetch_sub(1, Ordering::Release);
@@ -324,7 +324,7 @@ impl<T> Shard<T> {
         #[cfg(test)]
         println!("-> remove_remote {:?}", addr);
         self.pages
-            .get(addr.index())?
+            .get(addr.index(self.initial_page_sz))?
             .remove_remote(idx)
             .map(|item| {
                 self.len.fetch_sub(1, Ordering::Release);

@@ -66,8 +66,10 @@ pub(crate) struct Addr(usize);
 impl Addr {
     const NULL: usize = Self::BITS + 1;
 
-    pub(crate) fn index(&self) -> usize {
-        64 - (self.0 + 32 >> 6).leading_zeros() as usize
+    pub(crate) fn index(&self, initial_sz: usize) -> usize {
+        debug_assert!(initial_sz.is_power_of_two());
+        let shift = initial_sz.trailing_zeros() + 1;
+        64 - (self.0 + initial_sz >> shift).leading_zeros() as usize
     }
 
     pub(crate) const fn offset(&self) -> usize {
