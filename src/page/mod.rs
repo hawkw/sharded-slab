@@ -67,11 +67,7 @@ impl Addr {
     const NULL: usize = Self::BITS + 1;
 
     pub(crate) fn index(&self) -> usize {
-        if self.0 < 32 {
-            0
-        } else {
-            64 - (self.0 + 32 >> 6).leading_zeros() as usize
-        }
+        64 - (self.0 + 32 >> 6).leading_zeros() as usize
     }
 
     pub(crate) const fn offset(&self) -> usize {
