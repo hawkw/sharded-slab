@@ -281,6 +281,7 @@ impl<T> Shard<T> {
             return None;
         }
         let sz = self.initial_page_sz * 2usize.pow(pidx as u32);
+        #[cfg(test)]
         println!("new page; sz={:?}; prev_sz={:?}", sz, self.sz);
         // get new page
         let mut page = Page::new(sz, self.sz);

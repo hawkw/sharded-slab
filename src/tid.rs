@@ -150,7 +150,6 @@ impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(Tid { id, .. }) = self.0.get() {
             if let Ok(mut free) = REGISTRY.free.lock() {
-                println!("drop tid: {}", id);
                 free.push_back(id);
             }
         }
