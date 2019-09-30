@@ -4,21 +4,22 @@ use crate::sync::{
 };
 use crate::{cfg, page, Pack, Tid, Unpack};
 use std::{fmt, marker::PhantomData};
-#[derive(Debug)]
-pub(crate) struct Slot<T, P: cfg::Params> {
+
+pub(crate) struct Slot<T, P> {
     gen: Generation<P>,
     next: AtomicUsize,
     item: CausalCell<Option<T>>,
 }
 
 #[repr(transparent)]
-pub(crate) struct Generation<C: cfg::Params = cfg::DefaultParams> {
+pub(crate) struct Generation<C = cfg::DefaultParams> {
     value: usize,
     _cfg: PhantomData<fn(C)>,
 }
 
 impl<C: cfg::Params> Pack<C> for Generation<C> {
     const LEN: usize = (cfg::WIDTH - C::RESERVED_BITS) - Self::SHIFT;
+    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = Tid<C>;
 
@@ -117,7 +118,16 @@ impl<T, P: cfg::Params> Slot<T, P> {
     }
 }
 
-impl<P: cfg::Params> fmt::Debug for Generation<P> {
+impl<P, T> fmt::Debug for Slot<P, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Slot")
+            .field("gen", &self.gen)
+            .field("next", &self.next.load(Ordering::Relaxed))
+            .finish()
+    }
+}
+
+impl<P> fmt::Debug for Generation<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Generation").field(&self.value).finish()
     }

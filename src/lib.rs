@@ -14,6 +14,7 @@ mod tid;
 pub(crate) use tid::Tid;
 pub(crate) mod cfg;
 mod iter;
+use cfg::CfgPrivate;
 pub use cfg::Params;
 
 use self::sync::{
@@ -21,10 +22,9 @@ use self::sync::{
     CausalCell,
 };
 use page::Page;
-use std::{marker::PhantomData, ops};
+use std::{fmt, marker::PhantomData};
 
 /// A sharded slab.
-#[derive(Debug)]
 pub struct Slab<T, P: cfg::Params = cfg::DefaultParams> {
     shards: Box<[CausalCell<Shard<T, P>>]>,
     _cfg: PhantomData<P>,
@@ -38,7 +38,6 @@ pub struct Builder<T> {
     _t: PhantomData<fn(T)>,
 }
 
-#[derive(Debug)]
 struct Shard<T, P: cfg::Params> {
     tid: usize,
     sz: usize,
@@ -193,9 +192,9 @@ impl<T, P: cfg::Params> Shard<T, P> {
     fn new(tid: usize) -> Self {
         Self {
             tid,
-            sz: P::ACTUAL_INITIAL_SZ,
+            sz: P::INITIAL_SZ,
             len: AtomicUsize::new(0),
-            pages: vec![Page::new(P::ACTUAL_INITIAL_SZ, 0)],
+            pages: vec![Page::new(P::INITIAL_SZ, 0)],
         }
     }
 
@@ -287,8 +286,27 @@ impl<T, P: cfg::Params> Shard<T, P> {
     }
 }
 
+impl<T: fmt::Debug, P: cfg::Params> fmt::Debug for Slab<T, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Slab")
+            // .field("shards", &self.shards)
+            .field("config", &P::debug())
+            .finish()
+    }
+}
+
 unsafe impl<T: Send, P: cfg::Params> Send for Slab<T, P> {}
 unsafe impl<T: Sync, P: cfg::Params> Sync for Slab<T, P> {}
+
+impl<T: fmt::Debug, P: cfg::Params> fmt::Debug for Shard<T, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Shard")
+            .field("tid", &self.tid)
+            .field("len", &self.len())
+            .field("pages", &self.pages)
+            .finish()
+    }
+}
 
 /// Token bit allocation:
 /// ```text
@@ -303,7 +321,7 @@ unsafe impl<T: Sync, P: cfg::Params> Sync for Slab<T, P> {}
 pub(crate) trait Pack<C: cfg::Params>: Sized {
     const LEN: usize;
 
-    const BITS: usize = cfg::make_mask(Self::LEN as _);
+    const BITS: usize;
     const SHIFT: usize = Self::Prev::SHIFT + Self::Prev::LEN;
     const MASK: usize = Self::BITS << Self::SHIFT;
 

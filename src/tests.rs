@@ -132,19 +132,19 @@ fn remove_remote_and_reuse() {
         let idx3 = slab.insert(3).expect("insert");
         let idx4 = slab.insert(4).expect("insert");
 
-        assert_eq!(slab.get(idx1), Some(&1));
-        assert_eq!(slab.get(idx2), Some(&2));
-        assert_eq!(slab.get(idx3), Some(&3));
-        assert_eq!(slab.get(idx4), Some(&4));
+        assert_eq!(slab.get(idx1), Some(&1), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx2), Some(&2), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx3), Some(&3), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx4), Some(&4), "slab: {:#?}", slab);
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
-            assert_eq!(s.remove(idx1), Some(1));
+            assert_eq!(s.remove(idx1), Some(1), "slab: {:#?}", s);
         });
 
         let s = slab.clone();
         let t2 = thread::spawn(move || {
-            assert_eq!(s.remove(idx2), Some(2));
+            assert_eq!(s.remove(idx2), Some(2), "slab: {:#?}", s);
         });
 
         t1.join().expect("thread 1 should not panic");
@@ -153,10 +153,10 @@ fn remove_remote_and_reuse() {
         let idx1 = slab.insert(5).expect("insert");
         let idx2 = slab.insert(6).expect("insert");
 
-        assert_eq!(slab.get(idx1), Some(&5));
-        assert_eq!(slab.get(idx2), Some(&6));
-        assert_eq!(slab.get(idx3), Some(&3));
-        assert_eq!(slab.get(idx4), Some(&4));
+        assert_eq!(slab.get(idx1), Some(&5), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx2), Some(&6), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx3), Some(&3), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx4), Some(&4), "slab: {:#?}", slab);
     });
 }
 
@@ -201,3 +201,24 @@ fn unique_iter() {
 //         }
 //     })
 // }
+
+#[test]
+fn custom_page_sz() {
+    struct TinyConfig;
+
+    impl crate::Params for TinyConfig {
+        const INITIAL_PAGE_SIZE: usize = 4;
+    }
+
+    let mut model = loom::model::Builder::new();
+    model.max_branches = 20000;
+    model.check(|| {
+        let slab = Slab::<_, TinyConfig>::new_with_config();
+
+        for i in 0..1024 {
+            println!("{}", i);
+            let k = slab.insert(i).expect("insert");
+            assert_eq!(slab.get(k).expect("get"), &i, "slab: {:#?}", slab);
+        }
+    });
+}

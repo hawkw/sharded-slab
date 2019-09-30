@@ -15,13 +15,12 @@ fn custom_page_sz() {
     struct TinyConfig;
 
     impl sharded_slab::Params for TinyConfig {
-        const MAX_PAGES: usize = 1;
-        const INITIAL_PAGE_SIZE: usize = 4;
-        const MAX_THREADS: usize = 4096;
+        const INITIAL_PAGE_SIZE: usize = 16;
     }
     let slab = Slab::<_, TinyConfig>::new_with_config();
 
     for i in 0..4096 {
+        println!("{}", i);
         let k = slab.insert(i).expect("insert");
         assert_eq!(slab.get(k).expect("get"), &i);
     }

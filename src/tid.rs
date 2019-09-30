@@ -1,4 +1,7 @@
-use crate::{cfg, page, Pack};
+use crate::{
+    cfg::{self, CfgPrivate},
+    page, Pack,
+};
 use std::{
     cell::{Cell, UnsafeCell},
     collections::VecDeque,
@@ -42,6 +45,7 @@ thread_local! {
 
 impl<C: cfg::Params> Pack<C> for Tid<C> {
     const LEN: usize = C::MAX_SHARDS.trailing_zeros() as usize + 1;
+    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = page::Addr<C>;
 

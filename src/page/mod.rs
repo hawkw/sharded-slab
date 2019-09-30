@@ -1,4 +1,4 @@
-use crate::cfg::{self, Unpack};
+use crate::cfg::{self, CfgPrivate, Unpack};
 use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
 use crate::{Pack, Tid};
 
@@ -16,8 +16,7 @@ impl<C: cfg::Params> Addr<C> {
     const NULL: usize = Self::BITS + 1;
 
     pub(crate) fn index(&self) -> usize {
-        cfg::WIDTH
-            - (self.addr + C::ACTUAL_INITIAL_SZ >> C::ADDR_INDEX_SHIFT).leading_zeros() as usize
+        cfg::WIDTH - (self.addr + C::INITIAL_SZ >> C::ADDR_INDEX_SHIFT).leading_zeros() as usize
     }
 
     pub(crate) fn offset(&self) -> usize {
@@ -26,8 +25,8 @@ impl<C: cfg::Params> Addr<C> {
 }
 
 impl<C: cfg::Params> Pack<C> for Addr<C> {
-    const LEN: usize =
-        C::MAX_PAGES + (cfg::next_pow2(C::ACTUAL_INITIAL_SZ).trailing_zeros() as usize + 1);
+    const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
+    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = ();
 
@@ -47,8 +46,7 @@ impl<C: cfg::Params> Pack<C> for Addr<C> {
 pub(crate) type Iter<'a, T, P> =
     std::iter::FilterMap<std::slice::Iter<'a, Slot<T, P>>, fn(&'a Slot<T, P>) -> Option<&'a T>>;
 
-#[derive(Debug)]
-pub(crate) struct Page<T, P: cfg::Params> {
+pub(crate) struct Page<T, P> {
     prev_sz: usize,
     remote_head: AtomicUsize,
     local_head: usize,
@@ -155,12 +153,26 @@ impl<T, P: cfg::Params> Page<T, P> {
     }
 }
 
+impl<P, T> fmt::Debug for Page<P, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Page")
+            .field(
+                "remote_head",
+                &format_args!("{:#0x}", &self.remote_head.load(Ordering::Relaxed)),
+            )
+            .field("local_head", &format_args!("{:#0x}", &self.local_head))
+            .field("prev_sz", &self.prev_sz)
+            .field("slab", &self.slab)
+            .finish()
+    }
+}
+
 impl<P: cfg::Params> fmt::Debug for Addr<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Addr")
-            .field("addr", &format_args!("{:0x}", &self.addr))
-            .field("index", &format_args!("{:0x}", &self.index()))
-            .field("offset", &format_args!("{:0x}", &self.offset()))
+            .field("addr", &format_args!("{:#0x}", &self.addr))
+            .field("index", &format_args!("{:#0x}", &self.index()))
+            .field("offset", &format_args!("{:#0x}", &self.offset()))
             .finish()
     }
 }
