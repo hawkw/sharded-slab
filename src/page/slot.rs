@@ -2,63 +2,64 @@ use crate::sync::{
     atomic::{AtomicUsize, Ordering},
     CausalCell,
 };
-use crate::{page, Pack, Tid, Unpack};
-
+use crate::{cfg, page, Pack, Tid, Unpack};
+use std::{fmt, marker::PhantomData};
 #[derive(Debug)]
-pub(crate) struct Slot<T> {
-    gen: Generation,
+pub(crate) struct Slot<T, P: cfg::Params> {
+    gen: Generation<P>,
     next: AtomicUsize,
     item: CausalCell<Option<T>>,
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) struct Generation(usize);
+pub(crate) struct Generation<C: cfg::Params = cfg::DefaultParams> {
+    value: usize,
+    _cfg: PhantomData<fn(C)>,
+}
 
-impl Pack for Generation {
-    #[cfg(target_pointer_width = "32")]
-    const BITS: usize = 0b1111;
-    #[cfg(target_pointer_width = "32")]
-    const LEN: usize = 4;
+impl<C: cfg::Params> Pack<C> for Generation<C> {
+    const LEN: usize = (cfg::WIDTH - C::RESERVED_BITS) - Self::SHIFT;
 
-    #[cfg(target_pointer_width = "64")]
-    const BITS: usize = 0b1111_1111;
-    #[cfg(target_pointer_width = "64")]
-    const LEN: usize = 8;
-
-    type Prev = Tid;
+    type Prev = Tid<C>;
 
     #[inline(always)]
     fn from_usize(u: usize) -> Self {
         debug_assert!(u <= Self::BITS);
-        Self(u)
+        Self::new(u)
     }
 
     #[inline(always)]
     fn as_usize(&self) -> usize {
-        self.0
+        self.value
     }
 }
 
-impl Generation {
+impl<C: cfg::Params> Generation<C> {
+    fn new(value: usize) -> Self {
+        Self {
+            value,
+            _cfg: PhantomData,
+        }
+    }
+
     #[inline]
     fn advance(&mut self) -> Self {
-        self.0 = (self.0 + 1) % Self::BITS;
-        debug_assert!(self.0 <= Self::BITS);
+        self.value = (self.value + 1) % Self::BITS;
+        debug_assert!(self.value <= Self::BITS);
         *self
     }
 }
 
-impl<T> Slot<T> {
+impl<T, P: cfg::Params> Slot<T, P> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
-            gen: Generation(0),
+            gen: Generation::new(0),
             item: CausalCell::new(None),
             next: AtomicUsize::new(next),
         }
     }
 
-    pub(in crate::page) fn get(&self, gen: impl Unpack<Generation>) -> Option<&T> {
+    pub(in crate::page) fn get(&self, gen: impl Unpack<P, Generation<P>>) -> Option<&T> {
         let gen = gen.unpack();
         #[cfg(test)]
         println!("-> get {:?}; current={:?}", gen, self.gen);
@@ -73,7 +74,7 @@ impl<T> Slot<T> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation {
+    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<P> {
         debug_assert!(
             self.item.with(|item| unsafe { (*item).is_none() }),
             "inserted into full slot"
@@ -93,7 +94,11 @@ impl<T> Slot<T> {
         self.next.load(Ordering::Acquire)
     }
 
-    pub(in crate::page) fn remove(&self, gen: impl Unpack<Generation>, next: usize) -> Option<T> {
+    pub(in crate::page) fn remove(
+        &self,
+        gen: impl Unpack<P, Generation<P>>,
+        next: usize,
+    ) -> Option<T> {
         let gen = gen.unpack();
 
         #[cfg(test)]
@@ -111,3 +116,37 @@ impl<T> Slot<T> {
         }
     }
 }
+
+impl<P: cfg::Params> fmt::Debug for Generation<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Generation").field(&self.value).finish()
+    }
+}
+
+impl<P: cfg::Params> PartialEq for Generation<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<P: cfg::Params> Eq for Generation<P> {}
+
+impl<P: cfg::Params> PartialOrd for Generation<P> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.value.partial_cmp(&other.value)
+    }
+}
+
+impl<P: cfg::Params> Ord for Generation<P> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+impl<P: cfg::Params> Clone for Generation<P> {
+    fn clone(&self) -> Self {
+        Self::new(self.value)
+    }
+}
+
+impl<P: cfg::Params> Copy for Generation<P> {}

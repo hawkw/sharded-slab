@@ -1,124 +1,75 @@
+use crate::cfg::{self, Unpack};
 use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
-use crate::{Pack, Tid, Unpack};
+use crate::{Pack, Tid};
 
 pub(crate) mod slot;
 use self::slot::Slot;
-use std::{fmt, ops};
+use std::{fmt, marker::PhantomData, ops};
 
 #[repr(transparent)]
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) struct Offset(usize);
-
-impl Pack for Offset {
-    #[cfg(target_pointer_width = "32")]
-    const BITS: usize = 0b1_1111_1111_1111_1111;
-    #[cfg(target_pointer_width = "32")]
-    const LEN: usize = 17;
-
-    #[cfg(target_pointer_width = "64")]
-    const BITS: usize = 0x3_FFFF_FFFF;
-    #[cfg(target_pointer_width = "64")]
-    const LEN: usize = 34;
-
-    type Prev = ();
-
-    fn as_usize(&self) -> usize {
-        self.0
-    }
-
-    fn from_usize(val: usize) -> Self {
-        debug_assert!(val <= Self::BITS);
-        Self(val)
-    }
+pub(crate) struct Addr<C: cfg::Params = cfg::DefaultParams> {
+    addr: usize,
+    _cfg: PhantomData<fn(C)>,
 }
 
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) struct Index(usize);
-
-impl Pack for Index {
-    #[cfg(target_pointer_width = "32")]
-    const BITS: usize = 0b1111;
-    #[cfg(target_pointer_width = "32")]
-    const LEN: usize = 4;
-
-    #[cfg(target_pointer_width = "64")]
-    const BITS: usize = 0b1111_1111;
-    #[cfg(target_pointer_width = "64")]
-    const LEN: usize = 8;
-
-    type Prev = Offset;
-
-    fn as_usize(&self) -> usize {
-        self.0
-    }
-
-    fn from_usize(val: usize) -> Self {
-        debug_assert!(val <= Self::BITS);
-        Self(val)
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) struct Addr(usize);
-
-impl Addr {
+impl<C: cfg::Params> Addr<C> {
     const NULL: usize = Self::BITS + 1;
 
-    pub(crate) fn index(&self, initial_sz: usize) -> usize {
-        debug_assert!(initial_sz.is_power_of_two());
-        let shift = initial_sz.trailing_zeros() + 1;
-        64 - (self.0 + initial_sz >> shift).leading_zeros() as usize
+    pub(crate) fn index(&self) -> usize {
+        cfg::WIDTH
+            - (self.addr + C::ACTUAL_INITIAL_SZ >> C::ADDR_INDEX_SHIFT).leading_zeros() as usize
     }
 
-    pub(crate) const fn offset(&self) -> usize {
-        self.0
+    pub(crate) fn offset(&self) -> usize {
+        self.addr
     }
 }
 
-impl Pack for Addr {
-    #[cfg(target_pointer_width = "32")]
-    const LEN: usize = 16;
-    #[cfg(target_pointer_width = "64")]
-    const LEN: usize = 32;
-
-    #[cfg(target_pointer_width = "32")]
-    const BITS: usize = 0xFFFF;
-    #[cfg(target_pointer_width = "64")]
-    const BITS: usize = 0xFFFF_FFFF;
+impl<C: cfg::Params> Pack<C> for Addr<C> {
+    const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
 
     type Prev = ();
 
     fn as_usize(&self) -> usize {
-        self.0
+        self.addr
     }
 
-    fn from_usize(val: usize) -> Self {
-        debug_assert!(val <= Self::BITS);
-        Self(val)
+    fn from_usize(addr: usize) -> Self {
+        debug_assert!(addr <= Self::BITS);
+        Self {
+            addr,
+            _cfg: PhantomData,
+        }
     }
 }
 
-pub(crate) type Iter<'a, T> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<T>>, fn(&'a Slot<T>) -> Option<&'a T>>;
+pub(crate) type Iter<'a, T, P> =
+    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, P>>, fn(&'a Slot<T, P>) -> Option<&'a T>>;
 
 #[derive(Debug)]
-pub(crate) struct Page<T> {
+pub(crate) struct Page<T, P: cfg::Params> {
     prev_sz: usize,
     remote_head: AtomicUsize,
     local_head: usize,
-    slab: Box<[Slot<T>]>,
+    slab: Box<[Slot<T, P>]>,
 }
 
-impl<T> Page<T> {
-    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
+impl<T, P: cfg::Params> Page<T, P> {
+    const NULL: usize = Addr::<P>::NULL;
+
+    pub(crate) fn new(number: usize) -> Self {
+        let size = P::page_size(number);
+        let prev_sz = if number == 0 {
+            0
+        } else {
+            P::page_size(number - 1)
+        };
         let mut slab = Vec::with_capacity(size);
         slab.extend((1..size).map(Slot::new));
-        slab.push(Slot::new(Addr::NULL));
+        slab.push(Slot::new(Self::NULL));
         Self {
             prev_sz,
-            remote_head: AtomicUsize::new(Addr::NULL),
+            remote_head: AtomicUsize::new(Self::NULL),
             local_head: 0,
             slab: slab.into_boxed_slice(),
         }
@@ -131,13 +82,13 @@ impl<T> Page<T> {
         let head = if head < self.slab.len() {
             head
         } else {
-            let head = self.remote_head.swap(Addr::NULL, Ordering::Acquire);
+            let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
             #[cfg(test)]
             println!("-> remote head {:?}", head);
             head
         };
 
-        if head != Addr::NULL {
+        if head != Self::NULL {
             let slot = &mut self.slab[head];
             let gen = slot.insert(t);
             self.local_head = slot.next();
@@ -146,12 +97,14 @@ impl<T> Page<T> {
             println!("insert at offset: {}", index);
             Some(gen.pack(head + self.prev_sz))
         } else {
+            #[cfg(test)]
+            println!("-> NULL! {:?}", head);
             None
         }
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
-        let poff = Addr::from_packed(idx).offset() - self.prev_sz;
+        let poff = P::unpack_addr(idx).offset() - self.prev_sz;
         #[cfg(test)]
         println!("-> offset {:?}", poff);
 
@@ -159,8 +112,8 @@ impl<T> Page<T> {
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) -> Option<T> {
-        debug_assert!(Tid::from_packed(idx).is_current());
-        let offset = Addr::from_packed(idx).offset() - self.prev_sz;
+        debug_assert!(P::unpack_tid(idx).is_current());
+        let offset = P::unpack_addr(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
@@ -171,8 +124,8 @@ impl<T> Page<T> {
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) -> Option<T> {
-        debug_assert!(Tid::from_packed(idx) != Tid::current());
-        let offset = Addr::from_packed(idx).offset() - self.prev_sz;
+        debug_assert!(P::unpack_tid(idx) != Tid::current());
+        let offset = P::unpack_addr(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
@@ -188,7 +141,7 @@ impl<T> Page<T> {
         self.slab.len()
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T> {
+    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, P> {
         self.slab.iter().filter_map(Slot::value)
     }
 
@@ -207,32 +160,43 @@ impl<T> Page<T> {
     }
 }
 
-// impl<T, P: Unpack<Offset>> ops::Index<P> for Page<T> {
-//     type Output = Slot<T>;
-//     #[inline]
-//     fn index(&self, idx: P) -> &Self::Output {
-//         &self.slab[idx.unpack().as_usize()]
-//     }
-// }
+impl<P: cfg::Params> fmt::Debug for Addr<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Addr")
+            .field("addr", &format_args!("{:0x}", &self.addr))
+            .field("index", &format_args!("{:0x}", &self.index()))
+            .field("offset", &format_args!("{:0x}", &self.offset()))
+            .finish()
+    }
+}
 
-// impl<T, P: Unpack<Offset>> ops::IndexMut<P> for Page<T> {
-//     #[inline]
-//     fn index_mut(&mut self, idx: P) -> &mut Self::Output {
-//         &mut self.slab[idx.unpack().as_usize()]
-//     }
-// }
+impl<P: cfg::Params> PartialEq for Addr<P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
 
-// impl fmt::Debug for Offset {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         if self == &Self::NULL {
-//             f.debug_tuple("page::Offset")
-//                 .field(&format_args!("NULL"))
-//                 .finish()
-//         } else {
-//             f.debug_tuple("page::Offset").field(&self.0).finish()
-//         }
-//     }
-// }
+impl<P: cfg::Params> Eq for Addr<P> {}
+
+impl<P: cfg::Params> PartialOrd for Addr<P> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.addr.partial_cmp(&other.addr)
+    }
+}
+
+impl<P: cfg::Params> Ord for Addr<P> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.addr.cmp(&other.addr)
+    }
+}
+
+impl<P: cfg::Params> Clone for Addr<P> {
+    fn clone(&self) -> Self {
+        Self::from_usize(self.addr)
+    }
+}
+
+impl<P: cfg::Params> Copy for Addr<P> {}
 
 #[cfg(test)]
 mod test {
@@ -242,25 +206,25 @@ mod test {
 
     proptest! {
         #[test]
-        fn addr_roundtrips(pidx in 0usize..Index::BITS) {
-            let addr = Addr::from_usize(pidx);
+        fn addr_roundtrips(pidx in 0usize..Addr::<cfg::DefaultParams>::BITS) {
+            let addr = Addr::<cfg::DefaultParams>::from_usize(pidx);
             let packed = addr.pack(0);
             assert_eq!(addr, Addr::from_packed(packed));
         }
         #[test]
-        fn gen_roundtrips(gen in 0usize..slot::Generation::BITS) {
-            let gen = slot::Generation::from_usize(gen);
+        fn gen_roundtrips(gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS) {
+            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
             let packed = gen.pack(0);
             assert_eq!(gen, slot::Generation::from_packed(packed));
         }
 
         #[test]
         fn page_roundtrips(
-            gen in 0usize..slot::Generation::BITS,
-            addr in 0usize..Addr::BITS,
+            gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS,
+            addr in 0usize..Addr::<cfg::DefaultParams>::BITS,
         ) {
-            let gen = slot::Generation::from_usize(gen);
-            let addr = Addr::from_usize(addr);
+            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
+            let addr = Addr::<cfg::DefaultParams>::from_usize(addr);
             let packed = gen.pack(addr.pack(0));
             assert_eq!(addr, Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));

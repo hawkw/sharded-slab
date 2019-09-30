@@ -4,6 +4,7 @@ use loom::thread;
 
 mod idx {
     use crate::{
+        cfg,
         page::{self, slot},
         Pack, Tid,
     };
@@ -11,21 +12,21 @@ mod idx {
 
     proptest! {
         #[test]
-        fn tid_roundtrips(tid in 0usize..Tid::BITS) {
-            let tid = Tid::from_usize(tid);
+        fn tid_roundtrips(tid in 0usize..Tid::<cfg::DefaultParams>::BITS) {
+            let tid = Tid::<cfg::DefaultParams>::from_usize(tid);
             let packed = tid.pack(0);
             assert_eq!(tid, Tid::from_packed(packed));
         }
 
         #[test]
         fn idx_roundtrips(
-            tid in 0usize..Tid::BITS,
-            gen in 0usize..slot::Generation::BITS,
-            addr in 0usize..page::Addr::BITS,
+            tid in 0usize..Tid::<cfg::DefaultParams>::BITS,
+            gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS,
+            addr in 0usize..page::Addr::<cfg::DefaultParams>::BITS,
         ) {
-            let tid = Tid::from_usize(tid);
-            let gen = slot::Generation::from_usize(gen);
-            let addr = page::Addr::from_usize(addr);
+            let tid = Tid::<cfg::DefaultParams>::from_usize(tid);
+            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
+            let addr = page::Addr::<cfg::DefaultParams>::from_usize(addr);
             let packed = tid.pack(gen.pack(addr.pack(0)));
             assert_eq!(addr, page::Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));
@@ -116,8 +117,15 @@ fn remove_remote() {
 
 #[test]
 fn remove_remote_and_reuse() {
+    struct TinyConfig;
+
+    impl crate::Params for TinyConfig {
+        const MAX_PAGES: usize = 1;
+        const INITIAL_PAGE_SIZE: usize = 4;
+        const MAX_THREADS: usize = 4096;
+    }
     loom::model(|| {
-        let slab = Arc::new(Slab::builder().max_pages(1).initial_page_size(4).finish());
+        let slab = Arc::new(Slab::<_, TinyConfig>::new_with_config());
 
         let idx1 = slab.insert(1).expect("insert");
         let idx2 = slab.insert(2).expect("insert");
@@ -131,13 +139,11 @@ fn remove_remote_and_reuse() {
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
-            println!("tid is: {:?}", crate::Tid::current());
             assert_eq!(s.remove(idx1), Some(1));
         });
 
         let s = slab.clone();
         let t2 = thread::spawn(move || {
-            println!("tid is: {:?}", crate::Tid::current());
             assert_eq!(s.remove(idx2), Some(2));
         });
 
