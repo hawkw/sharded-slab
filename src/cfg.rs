@@ -34,6 +34,13 @@ pub(crate) trait CfgPrivate: Config {
             "invalid Config: {:#?}",
             Self::debug()
         );
+
+        assert!(
+            Generation::<Self>::BITS >= 3,
+            "invalid Config: {:#?}\ngeneration counter should be at least 3 bits!",
+            Self::debug()
+        );
+
         assert!(
             Self::USED_BITS <= WIDTH,
             "invalid Config: {:#?}\ntotal number of bits per index is too large to fit in a word!",
