@@ -5,8 +5,8 @@ use crate::sync::{
 use crate::{cfg, page, Pack, Tid, Unpack};
 use std::{fmt, marker::PhantomData};
 
-pub(crate) struct Slot<T, P> {
-    gen: Generation<P>,
+pub(crate) struct Slot<T, C> {
+    gen: Generation<C>,
     next: AtomicUsize,
     item: CausalCell<Option<T>>,
 }
@@ -51,7 +51,7 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
-impl<T, P: cfg::Config> Slot<T, P> {
+impl<T, C: cfg::Config> Slot<T, C> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
             gen: Generation::new(0),
@@ -60,7 +60,7 @@ impl<T, P: cfg::Config> Slot<T, P> {
         }
     }
 
-    pub(in crate::page) fn get(&self, gen: impl Unpack<P, Generation<P>>) -> Option<&T> {
+    pub(in crate::page) fn get(&self, gen: impl Unpack<C, Generation<C>>) -> Option<&T> {
         let gen = gen.unpack();
         #[cfg(test)]
         println!("-> get {:?}; current={:?}", gen, self.gen);
@@ -75,7 +75,7 @@ impl<T, P: cfg::Config> Slot<T, P> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<P> {
+    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
         debug_assert!(
             self.item.with(|item| unsafe { (*item).is_none() }),
             "inserted into full slot"
@@ -97,7 +97,7 @@ impl<T, P: cfg::Config> Slot<T, P> {
 
     pub(in crate::page) fn remove(
         &self,
-        gen: impl Unpack<P, Generation<P>>,
+        gen: impl Unpack<C, Generation<C>>,
         next: usize,
     ) -> Option<T> {
         let gen = gen.unpack();
@@ -118,7 +118,7 @@ impl<T, P: cfg::Config> Slot<T, P> {
     }
 }
 
-impl<P, T> fmt::Debug for Slot<P, T> {
+impl<C, T> fmt::Debug for Slot<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slot")
             .field("gen", &self.gen)
@@ -127,36 +127,36 @@ impl<P, T> fmt::Debug for Slot<P, T> {
     }
 }
 
-impl<P> fmt::Debug for Generation<P> {
+impl<C> fmt::Debug for Generation<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Generation").field(&self.value).finish()
     }
 }
 
-impl<P: cfg::Config> PartialEq for Generation<P> {
+impl<C: cfg::Config> PartialEq for Generation<C> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl<P: cfg::Config> Eq for Generation<P> {}
+impl<C: cfg::Config> Eq for Generation<C> {}
 
-impl<P: cfg::Config> PartialOrd for Generation<P> {
+impl<C: cfg::Config> PartialOrd for Generation<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.value.partial_cmp(&other.value)
     }
 }
 
-impl<P: cfg::Config> Ord for Generation<P> {
+impl<C: cfg::Config> Ord for Generation<C> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.value.cmp(&other.value)
     }
 }
 
-impl<P: cfg::Config> Clone for Generation<P> {
+impl<C: cfg::Config> Clone for Generation<C> {
     fn clone(&self) -> Self {
         Self::new(self.value)
     }
 }
 
-impl<P: cfg::Config> Copy for Generation<P> {}
+impl<C: cfg::Config> Copy for Generation<C> {}

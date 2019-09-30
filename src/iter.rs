@@ -4,13 +4,13 @@ use crate::{
     Shard,
 };
 use std::slice;
-pub struct UniqueIter<'a, T, P: crate::cfg::Config> {
-    pub(super) shards: slice::IterMut<'a, CausalCell<Shard<T, P>>>,
-    pub(super) pages: slice::Iter<'a, Page<T, P>>,
-    pub(super) slots: page::Iter<'a, T, P>,
+pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
+    pub(super) shards: slice::IterMut<'a, CausalCell<Shard<T, C>>>,
+    pub(super) pages: slice::Iter<'a, Page<T, C>>,
+    pub(super) slots: page::Iter<'a, T, C>,
 }
 
-impl<'a, T, P: crate::cfg::Config> Iterator for UniqueIter<'a, T, P> {
+impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         loop {

@@ -18,9 +18,9 @@ use lazy_static::lazy_static;
 /// Uniquely identifies a thread.
 // #[repr(transparent)]
 #[derive(Hash)]
-pub(crate) struct Tid<P> {
+pub(crate) struct Tid<C> {
     id: usize,
-    _not_send: PhantomData<(UnsafeCell<()>, fn(P))>,
+    _not_send: PhantomData<(UnsafeCell<()>, fn(C))>,
 }
 
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl<C: cfg::Config> Pack<C> for Tid<C> {
     }
 }
 
-impl<P: cfg::Config> Tid<P> {
+impl<C: cfg::Config> Tid<C> {
     #[inline]
     pub(crate) fn current() -> Self {
         REGISTRATION
@@ -72,12 +72,12 @@ impl<P: cfg::Config> Tid<P> {
 
     pub(crate) fn is_current(&self) -> bool {
         REGISTRATION
-            .try_with(|r| self == &r.current::<P>())
+            .try_with(|r| self == &r.current::<C>())
             .unwrap_or(false)
     }
 }
 
-impl<P> Tid<P> {
+impl<C> Tid<C> {
     #[inline(always)]
     pub fn new(id: usize) -> Self {
         Self {
@@ -100,7 +100,7 @@ impl<P> Tid<P> {
     }
 }
 
-impl<P> fmt::Debug for Tid<P> {
+impl<C> fmt::Debug for Tid<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_poisoned() {
             f.debug_tuple("Tid")
@@ -114,15 +114,15 @@ impl<P> fmt::Debug for Tid<P> {
     }
 }
 
-impl<P> PartialEq for Tid<P> {
+impl<C> PartialEq for Tid<C> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl<P> Eq for Tid<P> {}
+impl<C> Eq for Tid<C> {}
 
-impl<P: cfg::Config> Clone for Tid<P> {
+impl<C: cfg::Config> Clone for Tid<C> {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
@@ -131,7 +131,7 @@ impl<P: cfg::Config> Clone for Tid<P> {
     }
 }
 
-impl<P: cfg::Config> Copy for Tid<P> {}
+impl<C: cfg::Config> Copy for Tid<C> {}
 
 // === impl Registration ===
 
@@ -140,7 +140,7 @@ impl Registration {
         Self(Cell::new(None))
     }
 
-    fn current<P: cfg::Config>(&self) -> Tid<P> {
+    fn current<C: cfg::Config>(&self) -> Tid<C> {
         if let Some(tid) = self.0.get().map(Tid::new) {
             tid
         } else {
@@ -149,9 +149,9 @@ impl Registration {
     }
 
     #[cold]
-    fn register<P: cfg::Config>(&self) -> Tid<P> {
+    fn register<C: cfg::Config>(&self) -> Tid<C> {
         let next = REGISTRY.next.fetch_add(1, Ordering::AcqRel);
-        let id = if next >= Tid::<P>::BITS {
+        let id = if next >= Tid::<C>::BITS {
             REGISTRY
                 .free
                 .lock()
@@ -161,7 +161,7 @@ impl Registration {
         } else {
             next
         };
-        debug_assert!(id <= Tid::<P>::BITS, "thread ID overflow!");
+        debug_assert!(id <= Tid::<C>::BITS, "thread ID overflow!");
         self.0.set(Some(id));
         Tid::new(id)
     }

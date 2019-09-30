@@ -43,18 +43,18 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, P> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, P>>, fn(&'a Slot<T, P>) -> Option<&'a T>>;
+pub(crate) type Iter<'a, T, C> =
+    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
 
-pub(crate) struct Page<T, P> {
+pub(crate) struct Page<T, C> {
     prev_sz: usize,
     remote_head: AtomicUsize,
     local_head: usize,
-    slab: Box<[Slot<T, P>]>,
+    slab: Box<[Slot<T, C>]>,
 }
 
-impl<T, P: cfg::Config> Page<T, P> {
-    const NULL: usize = Addr::<P>::NULL;
+impl<T, C: cfg::Config> Page<T, C> {
+    const NULL: usize = Addr::<C>::NULL;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
         let mut slab = Vec::with_capacity(size);
@@ -97,7 +97,7 @@ impl<T, P: cfg::Config> Page<T, P> {
     }
 
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
-        let poff = P::unpack_addr(idx).offset() - self.prev_sz;
+        let poff = C::unpack_addr(idx).offset() - self.prev_sz;
         #[cfg(test)]
         println!("-> offset {:?}", poff);
 
@@ -105,8 +105,8 @@ impl<T, P: cfg::Config> Page<T, P> {
     }
 
     pub(crate) fn remove_local(&mut self, idx: usize) -> Option<T> {
-        debug_assert!(P::unpack_tid(idx).is_current());
-        let offset = P::unpack_addr(idx).offset() - self.prev_sz;
+        debug_assert!(C::unpack_tid(idx).is_current());
+        let offset = C::unpack_addr(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
@@ -117,8 +117,8 @@ impl<T, P: cfg::Config> Page<T, P> {
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) -> Option<T> {
-        debug_assert!(P::unpack_tid(idx) != Tid::current());
-        let offset = P::unpack_addr(idx).offset() - self.prev_sz;
+        debug_assert!(C::unpack_tid(idx) != Tid::current());
+        let offset = C::unpack_addr(idx).offset() - self.prev_sz;
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
@@ -134,7 +134,7 @@ impl<T, P: cfg::Config> Page<T, P> {
         self.slab.len()
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, P> {
+    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C> {
         self.slab.iter().filter_map(Slot::value)
     }
 
@@ -153,7 +153,7 @@ impl<T, P: cfg::Config> Page<T, P> {
     }
 }
 
-impl<P, T> fmt::Debug for Page<P, T> {
+impl<C, T> fmt::Debug for Page<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Page")
             .field(
@@ -167,7 +167,7 @@ impl<P, T> fmt::Debug for Page<P, T> {
     }
 }
 
-impl<P: cfg::Config> fmt::Debug for Addr<P> {
+impl<C: cfg::Config> fmt::Debug for Addr<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Addr")
             .field("addr", &format_args!("{:#0x}", &self.addr))
@@ -177,33 +177,33 @@ impl<P: cfg::Config> fmt::Debug for Addr<P> {
     }
 }
 
-impl<P: cfg::Config> PartialEq for Addr<P> {
+impl<C: cfg::Config> PartialEq for Addr<C> {
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr
     }
 }
 
-impl<P: cfg::Config> Eq for Addr<P> {}
+impl<C: cfg::Config> Eq for Addr<C> {}
 
-impl<P: cfg::Config> PartialOrd for Addr<P> {
+impl<C: cfg::Config> PartialOrd for Addr<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.addr.partial_cmp(&other.addr)
     }
 }
 
-impl<P: cfg::Config> Ord for Addr<P> {
+impl<C: cfg::Config> Ord for Addr<C> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.addr.cmp(&other.addr)
     }
 }
 
-impl<P: cfg::Config> Clone for Addr<P> {
+impl<C: cfg::Config> Clone for Addr<C> {
     fn clone(&self) -> Self {
         Self::from_usize(self.addr)
     }
 }
 
-impl<P: cfg::Config> Copy for Addr<P> {}
+impl<C: cfg::Config> Copy for Addr<C> {}
 
 #[cfg(test)]
 mod test {

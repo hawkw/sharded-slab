@@ -70,16 +70,16 @@ pub(crate) trait Unpack: Config {
     }
 }
 
-impl<P: Config> Unpack for P {}
-impl<P: Config> CfgPrivate for P {}
+impl<C: Config> Unpack for C {}
+impl<C: Config> CfgPrivate for C {}
 
 #[derive(Copy, Clone)]
 pub struct DefaultConfig {
     _p: (),
 }
 
-pub(crate) struct DebugConfig<P: Config> {
-    _cfg: PhantomData<fn(P)>,
+pub(crate) struct DebugConfig<C: Config> {
+    _cfg: PhantomData<fn(C)>,
 }
 
 pub(crate) const WIDTH: usize = std::mem::size_of::<usize>() * 8;
@@ -107,14 +107,14 @@ impl Config for DefaultConfig {
     const MAX_PAGES: usize = WIDTH / 2;
 }
 
-impl<P: Config> fmt::Debug for DebugConfig<P> {
+impl<C: Config> fmt::Debug for DebugConfig<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
-            .field("initial_page_size", &P::INITIAL_SZ)
-            .field("max_shards", &P::MAX_SHARDS)
-            .field("max_pages", &P::MAX_PAGES)
-            .field("used_bits", &P::USED_BITS)
-            .field("reserved_bits", &P::RESERVED_BITS)
+            .field("initial_page_size", &C::INITIAL_SZ)
+            .field("max_shards", &C::MAX_SHARDS)
+            .field("max_pages", &C::MAX_PAGES)
+            .field("used_bits", &C::USED_BITS)
+            .field("reserved_bits", &C::RESERVED_BITS)
             .field("pointer_width", &WIDTH)
             .finish()
     }

@@ -25,9 +25,9 @@ use page::Page;
 use std::{fmt, marker::PhantomData};
 
 /// A sharded slab.
-pub struct Slab<T, P: cfg::Config = cfg::DefaultConfig> {
-    shards: Box<[CausalCell<Shard<T, P>>]>,
-    _cfg: PhantomData<P>,
+pub struct Slab<T, C: cfg::Config = cfg::DefaultConfig> {
+    shards: Box<[CausalCell<Shard<T, C>>]>,
+    _cfg: PhantomData<C>,
 }
 
 #[derive(Clone, Debug)]
@@ -38,7 +38,7 @@ pub struct Builder<T> {
     _t: PhantomData<fn(T)>,
 }
 
-struct Shard<T, P: cfg::Config> {
+struct Shard<T, C: cfg::Config> {
     tid: usize,
     sz: usize,
     len: AtomicUsize,
@@ -61,7 +61,7 @@ struct Shard<T, P: cfg::Config> {
     //                      │XXXXXXXX│
     //                      └────────┘
     //                         ...
-    pages: Vec<Page<T, P>>,
+    pages: Vec<Page<T, C>>,
 }
 
 impl<T> Slab<T> {
@@ -70,11 +70,11 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T, P: cfg::Config> Slab<T, P> {
-    pub fn new_with_Config() -> Slab<T, P> {
-        let mut shards = Vec::with_capacity(P::MAX_SHARDS);
+impl<T, C: cfg::Config> Slab<T, C> {
+    pub fn new_with_Config() -> Slab<T, C> {
+        let mut shards = Vec::with_capacity(C::MAX_SHARDS);
         let mut idx = 0;
-        shards.resize_with(P::MAX_SHARDS, || {
+        shards.resize_with(C::MAX_SHARDS, || {
             let shard = Shard::new(idx);
             idx += 1;
             CausalCell::new(shard)
@@ -87,7 +87,7 @@ impl<T, P: cfg::Config> Slab<T, P> {
 
     /// Inserts
     pub fn insert(&self, value: T) -> Option<usize> {
-        let tid = Tid::<P>::current();
+        let tid = Tid::<C>::current();
         #[cfg(test)]
         println!("insert {:?}", tid);
         self.shards[tid.as_usize()]
@@ -104,7 +104,7 @@ impl<T, P: cfg::Config> Slab<T, P> {
     /// If the slab does not contain a value for that key, `None` is returned
     /// instead.
     pub fn remove(&self, idx: usize) -> Option<T> {
-        let tid: Tid<P> = idx.unpack();
+        let tid: Tid<C> = idx.unpack();
         #[cfg(test)]
         println!("rm {:?}", tid);
         if tid.is_current() {
@@ -132,7 +132,7 @@ impl<T, P: cfg::Config> Slab<T, P> {
     /// assert_eq!(slab.get(12345), None);
     /// ```
     pub fn get(&self, key: usize) -> Option<&T> {
-        let tid: Tid<P> = key.unpack();
+        let tid: Tid<C> = key.unpack();
         #[cfg(test)]
         println!("get {:?}", tid);
         self.shards
@@ -168,7 +168,7 @@ impl<T, P: cfg::Config> Slab<T, P> {
         self.total_capacity() - self.len()
     }
 
-    pub fn unique_iter<'a>(&'a mut self) -> iter::UniqueIter<'a, T, P> {
+    pub fn unique_iter<'a>(&'a mut self) -> iter::UniqueIter<'a, T, C> {
         let mut shards = self.shards.iter_mut();
         let shard = shards.next().expect("must be at least 1 shard");
         let mut pages = shard.with(|shard| unsafe { (*shard).iter() });
@@ -188,23 +188,23 @@ impl<T, P: cfg::Config> Slab<T, P> {
     }
 }
 
-impl<T, P: cfg::Config> Shard<T, P> {
+impl<T, C: cfg::Config> Shard<T, C> {
     fn new(tid: usize) -> Self {
         Self {
             tid,
-            sz: P::INITIAL_SZ,
+            sz: C::INITIAL_SZ,
             len: AtomicUsize::new(0),
-            pages: vec![Page::new(P::INITIAL_SZ, 0)],
+            pages: vec![Page::new(C::INITIAL_SZ, 0)],
         }
     }
 
     #[inline(always)]
-    fn unpack_addr(idx: usize) -> page::Addr<P> {
+    fn unpack_addr(idx: usize) -> page::Addr<C> {
         page::Addr::from_packed(idx)
     }
 
     fn insert(&mut self, value: T) -> Option<usize> {
-        debug_assert_eq!(Tid::<P>::current().as_usize(), self.tid);
+        debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
 
         let mut value = Some(value);
         for (_pidx, page) in self.pages.iter_mut().enumerate() {
@@ -216,14 +216,14 @@ impl<T, P: cfg::Config> Shard<T, P> {
         }
 
         let pidx = self.pages.len();
-        if pidx >= P::MAX_PAGES {
+        if pidx >= C::MAX_PAGES {
             #[cfg(test)]
-            println!("max pages (len={}, max={})", self.pages.len(), P::MAX_PAGES);
+            println!("max pages (len={}, max={})", self.pages.len(), C::MAX_PAGES);
             // out of pages!
             return None;
         }
         // get new page
-        let sz = P::page_size(pidx);
+        let sz = C::page_size(pidx);
         let mut page = Page::new(sz, self.sz);
         self.sz += sz;
         let poff = page.insert(&mut value).expect("new page should be empty");
@@ -233,7 +233,7 @@ impl<T, P: cfg::Config> Shard<T, P> {
     }
 
     fn get(&self, idx: usize) -> Option<&T> {
-        debug_assert_eq!(Tid::<P>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let addr = Self::unpack_addr(idx);
         let i = addr.index();
         #[cfg(test)]
@@ -242,8 +242,8 @@ impl<T, P: cfg::Config> Shard<T, P> {
     }
 
     fn remove_local(&mut self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<P>::current().as_usize(), self.tid);
-        debug_assert_eq!(Tid::<P>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let addr = Self::unpack_addr(idx);
 
         #[cfg(test)]
@@ -258,8 +258,8 @@ impl<T, P: cfg::Config> Shard<T, P> {
     }
 
     fn remove_remote(&self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<P>::from_packed(idx).as_usize(), self.tid);
-        debug_assert!(Tid::<P>::current().as_usize() != self.tid);
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert!(Tid::<C>::current().as_usize() != self.tid);
         let addr = Self::unpack_addr(idx);
 
         #[cfg(test)]
@@ -281,24 +281,24 @@ impl<T, P: cfg::Config> Shard<T, P> {
         self.iter().map(Page::total_capacity).sum()
     }
 
-    fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T, P>> {
+    fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T, C>> {
         self.pages.iter()
     }
 }
 
-impl<T: fmt::Debug, P: cfg::Config> fmt::Debug for Slab<T, P> {
+impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slab")
             // .field("shards", &self.shards)
-            .field("Config", &P::debug())
+            .field("Config", &C::debug())
             .finish()
     }
 }
 
-unsafe impl<T: Send, P: cfg::Config> Send for Slab<T, P> {}
-unsafe impl<T: Sync, P: cfg::Config> Sync for Slab<T, P> {}
+unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
+unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
-impl<T: fmt::Debug, P: cfg::Config> fmt::Debug for Shard<T, P> {
+impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Shard")
             .field("tid", &self.tid)
@@ -368,11 +368,11 @@ impl<C: cfg::Config> Pack<C> for () {
     }
 }
 
-pub(crate) trait Unpack<P, T> {
+pub(crate) trait Unpack<C, T> {
     fn unpack(self) -> T;
 }
 
-impl<P: cfg::Config, T: Pack<P>> Unpack<P, T> for usize {
+impl<C: cfg::Config, T: Pack<C>> Unpack<C, T> for usize {
     #[inline(always)]
     fn unpack(self) -> T {
         T::from_packed(self)
