@@ -12,21 +12,21 @@ mod idx {
 
     proptest! {
         #[test]
-        fn tid_roundtrips(tid in 0usize..Tid::<cfg::DefaultParams>::BITS) {
-            let tid = Tid::<cfg::DefaultParams>::from_usize(tid);
+        fn tid_roundtrips(tid in 0usize..Tid::<cfg::DefaultConfig>::BITS) {
+            let tid = Tid::<cfg::DefaultConfig>::from_usize(tid);
             let packed = tid.pack(0);
             assert_eq!(tid, Tid::from_packed(packed));
         }
 
         #[test]
         fn idx_roundtrips(
-            tid in 0usize..Tid::<cfg::DefaultParams>::BITS,
-            gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS,
-            addr in 0usize..page::Addr::<cfg::DefaultParams>::BITS,
+            tid in 0usize..Tid::<cfg::DefaultConfig>::BITS,
+            gen in 0usize..slot::Generation::<cfg::DefaultConfig>::BITS,
+            addr in 0usize..page::Addr::<cfg::DefaultConfig>::BITS,
         ) {
-            let tid = Tid::<cfg::DefaultParams>::from_usize(tid);
-            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
-            let addr = page::Addr::<cfg::DefaultParams>::from_usize(addr);
+            let tid = Tid::<cfg::DefaultConfig>::from_usize(tid);
+            let gen = slot::Generation::<cfg::DefaultConfig>::from_usize(gen);
+            let addr = page::Addr::<cfg::DefaultConfig>::from_usize(addr);
             let packed = tid.pack(gen.pack(addr.pack(0)));
             assert_eq!(addr, page::Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));
@@ -119,13 +119,13 @@ fn remove_remote() {
 fn remove_remote_and_reuse() {
     struct TinyConfig;
 
-    impl crate::Params for TinyConfig {
+    impl crate::Config for TinyConfig {
         const MAX_PAGES: usize = 1;
         const INITIAL_PAGE_SIZE: usize = 4;
         const MAX_THREADS: usize = 4096;
     }
     loom::model(|| {
-        let slab = Arc::new(Slab::<_, TinyConfig>::new_with_config());
+        let slab = Arc::new(Slab::<_, TinyConfig>::new_with_Config());
 
         let idx1 = slab.insert(1).expect("insert");
         let idx2 = slab.insert(2).expect("insert");
@@ -206,14 +206,14 @@ fn unique_iter() {
 fn custom_page_sz() {
     struct TinyConfig;
 
-    impl crate::Params for TinyConfig {
+    impl crate::Config for TinyConfig {
         const INITIAL_PAGE_SIZE: usize = 4;
     }
 
     let mut model = loom::model::Builder::new();
     model.max_branches = 20000;
     model.check(|| {
-        let slab = Slab::<_, TinyConfig>::new_with_config();
+        let slab = Slab::<_, TinyConfig>::new_with_Config();
 
         for i in 0..1024 {
             println!("{}", i);

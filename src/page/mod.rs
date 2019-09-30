@@ -7,12 +7,12 @@ use self::slot::Slot;
 use std::{fmt, marker::PhantomData, ops};
 
 #[repr(transparent)]
-pub(crate) struct Addr<C: cfg::Params = cfg::DefaultParams> {
+pub(crate) struct Addr<C: cfg::Config = cfg::DefaultConfig> {
     addr: usize,
     _cfg: PhantomData<fn(C)>,
 }
 
-impl<C: cfg::Params> Addr<C> {
+impl<C: cfg::Config> Addr<C> {
     const NULL: usize = Self::BITS + 1;
 
     pub(crate) fn index(&self) -> usize {
@@ -24,7 +24,7 @@ impl<C: cfg::Params> Addr<C> {
     }
 }
 
-impl<C: cfg::Params> Pack<C> for Addr<C> {
+impl<C: cfg::Config> Pack<C> for Addr<C> {
     const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
     const BITS: usize = cfg::make_mask(Self::LEN);
 
@@ -53,7 +53,7 @@ pub(crate) struct Page<T, P> {
     slab: Box<[Slot<T, P>]>,
 }
 
-impl<T, P: cfg::Params> Page<T, P> {
+impl<T, P: cfg::Config> Page<T, P> {
     const NULL: usize = Addr::<P>::NULL;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
@@ -167,7 +167,7 @@ impl<P, T> fmt::Debug for Page<P, T> {
     }
 }
 
-impl<P: cfg::Params> fmt::Debug for Addr<P> {
+impl<P: cfg::Config> fmt::Debug for Addr<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Addr")
             .field("addr", &format_args!("{:#0x}", &self.addr))
@@ -177,33 +177,33 @@ impl<P: cfg::Params> fmt::Debug for Addr<P> {
     }
 }
 
-impl<P: cfg::Params> PartialEq for Addr<P> {
+impl<P: cfg::Config> PartialEq for Addr<P> {
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr
     }
 }
 
-impl<P: cfg::Params> Eq for Addr<P> {}
+impl<P: cfg::Config> Eq for Addr<P> {}
 
-impl<P: cfg::Params> PartialOrd for Addr<P> {
+impl<P: cfg::Config> PartialOrd for Addr<P> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.addr.partial_cmp(&other.addr)
     }
 }
 
-impl<P: cfg::Params> Ord for Addr<P> {
+impl<P: cfg::Config> Ord for Addr<P> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.addr.cmp(&other.addr)
     }
 }
 
-impl<P: cfg::Params> Clone for Addr<P> {
+impl<P: cfg::Config> Clone for Addr<P> {
     fn clone(&self) -> Self {
         Self::from_usize(self.addr)
     }
 }
 
-impl<P: cfg::Params> Copy for Addr<P> {}
+impl<P: cfg::Config> Copy for Addr<P> {}
 
 #[cfg(test)]
 mod test {
@@ -213,25 +213,25 @@ mod test {
 
     proptest! {
         #[test]
-        fn addr_roundtrips(pidx in 0usize..Addr::<cfg::DefaultParams>::BITS) {
-            let addr = Addr::<cfg::DefaultParams>::from_usize(pidx);
+        fn addr_roundtrips(pidx in 0usize..Addr::<cfg::DefaultConfig>::BITS) {
+            let addr = Addr::<cfg::DefaultConfig>::from_usize(pidx);
             let packed = addr.pack(0);
             assert_eq!(addr, Addr::from_packed(packed));
         }
         #[test]
-        fn gen_roundtrips(gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS) {
-            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
+        fn gen_roundtrips(gen in 0usize..slot::Generation::<cfg::DefaultConfig>::BITS) {
+            let gen = slot::Generation::<cfg::DefaultConfig>::from_usize(gen);
             let packed = gen.pack(0);
             assert_eq!(gen, slot::Generation::from_packed(packed));
         }
 
         #[test]
         fn page_roundtrips(
-            gen in 0usize..slot::Generation::<cfg::DefaultParams>::BITS,
-            addr in 0usize..Addr::<cfg::DefaultParams>::BITS,
+            gen in 0usize..slot::Generation::<cfg::DefaultConfig>::BITS,
+            addr in 0usize..Addr::<cfg::DefaultConfig>::BITS,
         ) {
-            let gen = slot::Generation::<cfg::DefaultParams>::from_usize(gen);
-            let addr = Addr::<cfg::DefaultParams>::from_usize(addr);
+            let gen = slot::Generation::<cfg::DefaultConfig>::from_usize(gen);
+            let addr = Addr::<cfg::DefaultConfig>::from_usize(addr);
             let packed = gen.pack(addr.pack(0));
             assert_eq!(addr, Addr::from_packed(packed));
             assert_eq!(gen, slot::Generation::from_packed(packed));

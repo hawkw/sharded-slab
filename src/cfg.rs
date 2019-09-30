@@ -2,14 +2,14 @@ use crate::page::{slot::Generation, Addr};
 use crate::Pack;
 use std::{fmt, marker::PhantomData};
 
-pub trait Params: Sized {
-    const MAX_THREADS: usize = DefaultParams::MAX_THREADS;
-    const MAX_PAGES: usize = DefaultParams::MAX_PAGES;
-    const INITIAL_PAGE_SIZE: usize = DefaultParams::INITIAL_PAGE_SIZE;
+pub trait Config: Sized {
+    const MAX_THREADS: usize = DefaultConfig::MAX_THREADS;
+    const MAX_PAGES: usize = DefaultConfig::MAX_PAGES;
+    const INITIAL_PAGE_SIZE: usize = DefaultConfig::INITIAL_PAGE_SIZE;
     const RESERVED_BITS: usize = 0;
 }
 
-pub(crate) trait CfgPrivate: Params {
+pub(crate) trait CfgPrivate: Config {
     const USED_BITS: usize = Generation::<Self>::LEN + Generation::<Self>::SHIFT;
     const INITIAL_SZ: usize = next_pow2(Self::INITIAL_PAGE_SIZE);
     const MAX_SHARDS: usize = next_pow2(Self::MAX_THREADS);
@@ -26,29 +26,29 @@ pub(crate) trait CfgPrivate: Params {
     fn validate() {
         assert!(
             Self::INITIAL_SZ.is_power_of_two(),
-            "invalid config: {:#?}",
+            "invalid Config: {:#?}",
             Self::debug(),
         );
         assert!(
             Self::INITIAL_SZ <= Addr::<Self>::BITS,
-            "invalid config: {:#?}",
+            "invalid Config: {:#?}",
             Self::debug()
         );
         assert!(
             Self::USED_BITS <= WIDTH,
-            "invalid config: {:#?}\ntotal number of bits per index is too large to fit in a word!",
+            "invalid Config: {:#?}\ntotal number of bits per index is too large to fit in a word!",
             Self::debug()
         );
 
         assert!(
             WIDTH - Self::USED_BITS >= Self::RESERVED_BITS,
-            "invalid config: {:#?}\nindices are too large to fit reserved bits!",
+            "invalid Config: {:#?}\nindices are too large to fit reserved bits!",
             Self::debug()
         );
     }
 }
 
-pub(crate) trait Unpack: Params {
+pub(crate) trait Unpack: Config {
     #[inline(always)]
     fn unpack<A: Pack<Self>>(packed: usize) -> A {
         A::from_packed(packed)
@@ -70,15 +70,15 @@ pub(crate) trait Unpack: Params {
     }
 }
 
-impl<P: Params> Unpack for P {}
-impl<P: Params> CfgPrivate for P {}
+impl<P: Config> Unpack for P {}
+impl<P: Config> CfgPrivate for P {}
 
 #[derive(Copy, Clone)]
-pub struct DefaultParams {
+pub struct DefaultConfig {
     _p: (),
 }
 
-pub(crate) struct DebugConfig<P: Params> {
+pub(crate) struct DebugConfig<P: Config> {
     _cfg: PhantomData<fn(P)>,
 }
 
@@ -95,8 +95,8 @@ pub(crate) const fn next_pow2(n: usize) -> usize {
     1 << (WIDTH - zeros as usize - pow2 as usize)
 }
 
-// === impl DefaultParams ===
-impl Params for DefaultParams {
+// === impl DefaultConfig ===
+impl Config for DefaultConfig {
     const INITIAL_PAGE_SIZE: usize = 32;
 
     #[cfg(target_pointer_width = "64")]
@@ -107,7 +107,7 @@ impl Params for DefaultParams {
     const MAX_PAGES: usize = WIDTH / 2;
 }
 
-impl<P: Params> fmt::Debug for DebugConfig<P> {
+impl<P: Config> fmt::Debug for DebugConfig<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
             .field("initial_page_size", &P::INITIAL_SZ)

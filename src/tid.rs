@@ -43,7 +43,7 @@ thread_local! {
 
 // === impl Tid ===
 
-impl<C: cfg::Params> Pack<C> for Tid<C> {
+impl<C: cfg::Config> Pack<C> for Tid<C> {
     const LEN: usize = C::MAX_SHARDS.trailing_zeros() as usize + 1;
     const BITS: usize = cfg::make_mask(Self::LEN);
 
@@ -62,7 +62,7 @@ impl<C: cfg::Params> Pack<C> for Tid<C> {
     }
 }
 
-impl<P: cfg::Params> Tid<P> {
+impl<P: cfg::Config> Tid<P> {
     #[inline]
     pub(crate) fn current() -> Self {
         REGISTRATION
@@ -122,7 +122,7 @@ impl<P> PartialEq for Tid<P> {
 
 impl<P> Eq for Tid<P> {}
 
-impl<P: cfg::Params> Clone for Tid<P> {
+impl<P: cfg::Config> Clone for Tid<P> {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
@@ -131,7 +131,7 @@ impl<P: cfg::Params> Clone for Tid<P> {
     }
 }
 
-impl<P: cfg::Params> Copy for Tid<P> {}
+impl<P: cfg::Config> Copy for Tid<P> {}
 
 // === impl Registration ===
 
@@ -140,7 +140,7 @@ impl Registration {
         Self(Cell::new(None))
     }
 
-    fn current<P: cfg::Params>(&self) -> Tid<P> {
+    fn current<P: cfg::Config>(&self) -> Tid<P> {
         if let Some(tid) = self.0.get().map(Tid::new) {
             tid
         } else {
@@ -149,7 +149,7 @@ impl Registration {
     }
 
     #[cold]
-    fn register<P: cfg::Params>(&self) -> Tid<P> {
+    fn register<P: cfg::Config>(&self) -> Tid<P> {
         let next = REGISTRY.next.fetch_add(1, Ordering::AcqRel);
         let id = if next >= Tid::<P>::BITS {
             REGISTRY

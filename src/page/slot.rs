@@ -12,12 +12,12 @@ pub(crate) struct Slot<T, P> {
 }
 
 #[repr(transparent)]
-pub(crate) struct Generation<C = cfg::DefaultParams> {
+pub(crate) struct Generation<C = cfg::DefaultConfig> {
     value: usize,
     _cfg: PhantomData<fn(C)>,
 }
 
-impl<C: cfg::Params> Pack<C> for Generation<C> {
+impl<C: cfg::Config> Pack<C> for Generation<C> {
     const LEN: usize = (cfg::WIDTH - C::RESERVED_BITS) - Self::SHIFT;
     const BITS: usize = cfg::make_mask(Self::LEN);
 
@@ -35,7 +35,7 @@ impl<C: cfg::Params> Pack<C> for Generation<C> {
     }
 }
 
-impl<C: cfg::Params> Generation<C> {
+impl<C: cfg::Config> Generation<C> {
     fn new(value: usize) -> Self {
         Self {
             value,
@@ -51,7 +51,7 @@ impl<C: cfg::Params> Generation<C> {
     }
 }
 
-impl<T, P: cfg::Params> Slot<T, P> {
+impl<T, P: cfg::Config> Slot<T, P> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
             gen: Generation::new(0),
@@ -133,30 +133,30 @@ impl<P> fmt::Debug for Generation<P> {
     }
 }
 
-impl<P: cfg::Params> PartialEq for Generation<P> {
+impl<P: cfg::Config> PartialEq for Generation<P> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl<P: cfg::Params> Eq for Generation<P> {}
+impl<P: cfg::Config> Eq for Generation<P> {}
 
-impl<P: cfg::Params> PartialOrd for Generation<P> {
+impl<P: cfg::Config> PartialOrd for Generation<P> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.value.partial_cmp(&other.value)
     }
 }
 
-impl<P: cfg::Params> Ord for Generation<P> {
+impl<P: cfg::Config> Ord for Generation<P> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.value.cmp(&other.value)
     }
 }
 
-impl<P: cfg::Params> Clone for Generation<P> {
+impl<P: cfg::Config> Clone for Generation<P> {
     fn clone(&self) -> Self {
         Self::new(self.value)
     }
 }
 
-impl<P: cfg::Params> Copy for Generation<P> {}
+impl<P: cfg::Config> Copy for Generation<P> {}

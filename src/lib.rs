@@ -15,7 +15,7 @@ pub(crate) use tid::Tid;
 pub(crate) mod cfg;
 mod iter;
 use cfg::CfgPrivate;
-pub use cfg::Params;
+pub use cfg::Config;
 
 use self::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -25,7 +25,7 @@ use page::Page;
 use std::{fmt, marker::PhantomData};
 
 /// A sharded slab.
-pub struct Slab<T, P: cfg::Params = cfg::DefaultParams> {
+pub struct Slab<T, P: cfg::Config = cfg::DefaultConfig> {
     shards: Box<[CausalCell<Shard<T, P>>]>,
     _cfg: PhantomData<P>,
 }
@@ -38,7 +38,7 @@ pub struct Builder<T> {
     _t: PhantomData<fn(T)>,
 }
 
-struct Shard<T, P: cfg::Params> {
+struct Shard<T, P: cfg::Config> {
     tid: usize,
     sz: usize,
     len: AtomicUsize,
@@ -66,12 +66,12 @@ struct Shard<T, P: cfg::Params> {
 
 impl<T> Slab<T> {
     pub fn new() -> Self {
-        Self::new_with_config()
+        Self::new_with_Config()
     }
 }
 
-impl<T, P: cfg::Params> Slab<T, P> {
-    pub fn new_with_config() -> Slab<T, P> {
+impl<T, P: cfg::Config> Slab<T, P> {
+    pub fn new_with_Config() -> Slab<T, P> {
         let mut shards = Vec::with_capacity(P::MAX_SHARDS);
         let mut idx = 0;
         shards.resize_with(P::MAX_SHARDS, || {
@@ -188,7 +188,7 @@ impl<T, P: cfg::Params> Slab<T, P> {
     }
 }
 
-impl<T, P: cfg::Params> Shard<T, P> {
+impl<T, P: cfg::Config> Shard<T, P> {
     fn new(tid: usize) -> Self {
         Self {
             tid,
@@ -286,19 +286,19 @@ impl<T, P: cfg::Params> Shard<T, P> {
     }
 }
 
-impl<T: fmt::Debug, P: cfg::Params> fmt::Debug for Slab<T, P> {
+impl<T: fmt::Debug, P: cfg::Config> fmt::Debug for Slab<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slab")
             // .field("shards", &self.shards)
-            .field("config", &P::debug())
+            .field("Config", &P::debug())
             .finish()
     }
 }
 
-unsafe impl<T: Send, P: cfg::Params> Send for Slab<T, P> {}
-unsafe impl<T: Sync, P: cfg::Params> Sync for Slab<T, P> {}
+unsafe impl<T: Send, P: cfg::Config> Send for Slab<T, P> {}
+unsafe impl<T: Sync, P: cfg::Config> Sync for Slab<T, P> {}
 
-impl<T: fmt::Debug, P: cfg::Params> fmt::Debug for Shard<T, P> {
+impl<T: fmt::Debug, P: cfg::Config> fmt::Debug for Shard<T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Shard")
             .field("tid", &self.tid)
@@ -318,7 +318,7 @@ impl<T: fmt::Debug, P: cfg::Params> fmt::Debug for Shard<T, P> {
 ///   │    └───────────────────────thread id
 ///   └───────────────────────────generation
 /// ```
-pub(crate) trait Pack<C: cfg::Params>: Sized {
+pub(crate) trait Pack<C: cfg::Config>: Sized {
     const LEN: usize;
 
     const BITS: usize;
@@ -344,7 +344,7 @@ pub(crate) trait Pack<C: cfg::Params>: Sized {
     }
 }
 
-impl<C: cfg::Params> Pack<C> for () {
+impl<C: cfg::Config> Pack<C> for () {
     const BITS: usize = 0;
     const LEN: usize = 0;
     const SHIFT: usize = 0;
@@ -372,7 +372,7 @@ pub(crate) trait Unpack<P, T> {
     fn unpack(self) -> T;
 }
 
-impl<P: cfg::Params, T: Pack<P>> Unpack<P, T> for usize {
+impl<P: cfg::Config, T: Pack<P>> Unpack<P, T> for usize {
     #[inline(always)]
     fn unpack(self) -> T {
         T::from_packed(self)
