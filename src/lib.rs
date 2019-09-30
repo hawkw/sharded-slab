@@ -60,11 +60,8 @@ impl<T> Slab<T> {
     pub fn new() -> Self {
         Self::new_with_config()
     }
-}
 
-impl<T, C: cfg::Config> Slab<T, C> {
-    pub const USED_BITS: usize = C::USED_BITS;
-    pub fn new_with_config() -> Slab<T, C> {
+    pub fn new_with_config<C: cfg::Config>() -> Slab<T, C> {
         C::validate();
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
         let mut idx = 0;
@@ -73,11 +70,15 @@ impl<T, C: cfg::Config> Slab<T, C> {
             idx += 1;
             CausalCell::new(shard)
         });
-        Self {
+        Slab {
             shards: shards.into_boxed_slice(),
             _cfg: PhantomData,
         }
     }
+}
+
+impl<T, C: cfg::Config> Slab<T, C> {
+    pub const USED_BITS: usize = C::USED_BITS;
 
     /// Inserts
     pub fn insert(&self, value: T) -> Option<usize> {

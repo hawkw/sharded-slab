@@ -125,7 +125,7 @@ fn remove_remote_and_reuse() {
         const MAX_THREADS: usize = 4096;
     }
     loom::model(|| {
-        let slab = Arc::new(Slab::<_, TinyConfig>::new_with_config());
+        let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
 
         let idx1 = slab.insert(1).expect("insert");
         let idx2 = slab.insert(2).expect("insert");
@@ -213,7 +213,7 @@ fn custom_page_sz() {
     let mut model = loom::model::Builder::new();
     model.max_branches = 20000;
     model.check(|| {
-        let slab = Slab::<_, TinyConfig>::new_with_config();
+        let slab = Slab::new_with_config::<TinyConfig>();
 
         for i in 0..1024 {
             println!("{}", i);

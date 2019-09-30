@@ -17,7 +17,7 @@ fn custom_page_sz() {
     impl sharded_slab::Config for TinyConfig {
         const INITIAL_PAGE_SIZE: usize = 8;
     }
-    let slab = Slab::<_, TinyConfig>::new_with_config();
+    let slab = Slab::new_with_config::<TinyConfig>();
 
     for i in 0..4096 {
         println!("{}", i);
