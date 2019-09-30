@@ -26,7 +26,8 @@ impl<C: cfg::Params> Addr<C> {
 }
 
 impl<C: cfg::Params> Pack<C> for Addr<C> {
-    const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
+    const LEN: usize =
+        C::MAX_PAGES + (cfg::next_pow2(C::ACTUAL_INITIAL_SZ).trailing_zeros() as usize + 1);
 
     type Prev = ();
 
@@ -57,13 +58,7 @@ pub(crate) struct Page<T, P: cfg::Params> {
 impl<T, P: cfg::Params> Page<T, P> {
     const NULL: usize = Addr::<P>::NULL;
 
-    pub(crate) fn new(number: usize) -> Self {
-        let size = P::page_size(number);
-        let prev_sz = if number == 0 {
-            0
-        } else {
-            P::page_size(number - 1)
-        };
+    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
         let mut slab = Vec::with_capacity(size);
         slab.extend((1..size).map(Slot::new));
         slab.push(Slot::new(Self::NULL));

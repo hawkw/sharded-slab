@@ -195,7 +195,7 @@ impl<T, P: cfg::Params> Shard<T, P> {
             tid,
             sz: P::ACTUAL_INITIAL_SZ,
             len: AtomicUsize::new(0),
-            pages: vec![Page::new(0)],
+            pages: vec![Page::new(P::ACTUAL_INITIAL_SZ, 0)],
         }
     }
 
@@ -208,9 +208,9 @@ impl<T, P: cfg::Params> Shard<T, P> {
         debug_assert_eq!(Tid::<P>::current().as_usize(), self.tid);
 
         let mut value = Some(value);
-        for (pidx, page) in self.pages.iter_mut().enumerate() {
+        for (_pidx, page) in self.pages.iter_mut().enumerate() {
             #[cfg(test)]
-            println!("-> Index({:?}) ", pidx);
+            println!("-> Index({:?}) ", _pidx);
             if let Some(poff) = page.insert(&mut value) {
                 return Some(poff);
             }
@@ -224,8 +224,9 @@ impl<T, P: cfg::Params> Shard<T, P> {
             return None;
         }
         // get new page
-        let mut page = Page::new(pidx);
-        self.sz += P::page_size(pidx);
+        let sz = P::page_size(pidx);
+        let mut page = Page::new(sz, self.sz);
+        self.sz += sz;
         let poff = page.insert(&mut value).expect("new page should be empty");
         self.pages.push(page);
 

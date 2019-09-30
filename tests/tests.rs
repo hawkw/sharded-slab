@@ -4,6 +4,7 @@ fn big() {
     let slab = Slab::new();
 
     for i in 0..10000 {
+        println!("{:?}", i);
         let k = slab.insert(i).expect("insert");
         assert_eq!(slab.get(k).expect("get"), &i);
     }

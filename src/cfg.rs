@@ -17,7 +17,7 @@ pub trait Params: Sized {
     const ADDR_INDEX_SHIFT: usize = Self::ACTUAL_INITIAL_SZ.trailing_zeros() as usize + 1;
 
     fn page_size(n: usize) -> usize {
-        Self::ACTUAL_INITIAL_SZ * 2usize.pow(n as u32)
+        Self::ACTUAL_INITIAL_SZ * 2usize.pow(n as _)
     }
 
     fn validate() {
