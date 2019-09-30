@@ -64,6 +64,7 @@ impl<T> Slab<T> {
 
 impl<T, C: cfg::Config> Slab<T, C> {
     pub fn new_with_config() -> Slab<T, C> {
+        C::validate();
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
         let mut idx = 0;
         shards.resize_with(C::MAX_SHARDS, || {
