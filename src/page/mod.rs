@@ -4,7 +4,7 @@ use crate::{Pack, Tid};
 
 pub(crate) mod slot;
 use self::slot::Slot;
-use std::{fmt, marker::PhantomData, ops};
+use std::{fmt, marker::PhantomData};
 
 #[repr(transparent)]
 pub(crate) struct Addr<C: cfg::Config = cfg::DefaultConfig> {

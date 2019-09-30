@@ -2,7 +2,7 @@ use crate::sync::{
     atomic::{AtomicUsize, Ordering},
     CausalCell,
 };
-use crate::{cfg, page, Pack, Tid, Unpack};
+use crate::{cfg, Pack, Tid, Unpack};
 use std::{fmt, marker::PhantomData};
 
 pub(crate) struct Slot<T, C> {

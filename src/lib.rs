@@ -66,12 +66,12 @@ struct Shard<T, C: cfg::Config> {
 
 impl<T> Slab<T> {
     pub fn new() -> Self {
-        Self::new_with_Config()
+        Self::new_with_config()
     }
 }
 
 impl<T, C: cfg::Config> Slab<T, C> {
-    pub fn new_with_Config() -> Slab<T, C> {
+    pub fn new_with_config() -> Slab<T, C> {
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
         let mut idx = 0;
         shards.resize_with(C::MAX_SHARDS, || {
@@ -355,15 +355,15 @@ impl<C: cfg::Config> Pack<C> for () {
     fn as_usize(&self) -> usize {
         unreachable!()
     }
-    fn from_usize(val: usize) -> Self {
+    fn from_usize(_val: usize) -> Self {
         unreachable!()
     }
 
-    fn pack(&self, to: usize) -> usize {
+    fn pack(&self, _to: usize) -> usize {
         unreachable!()
     }
 
-    fn from_packed(from: usize) -> Self {
+    fn from_packed(_from: usize) -> Self {
         unreachable!()
     }
 }
