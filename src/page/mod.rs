@@ -1,4 +1,4 @@
-use crate::cfg::{self, CfgPrivate, Unpack};
+use crate::cfg::{self, CfgPrivate};
 use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
 use crate::{Pack, Tid};
 

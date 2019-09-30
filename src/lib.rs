@@ -30,14 +30,6 @@ pub struct Slab<T, C: cfg::Config = cfg::DefaultConfig> {
     _cfg: PhantomData<C>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Builder<T> {
-    threads: usize,
-    pages: usize,
-    initial_page_sz: usize,
-    _t: PhantomData<fn(T)>,
-}
-
 struct Shard<T, C: cfg::Config> {
     tid: usize,
     sz: usize,
@@ -104,7 +96,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// If the slab does not contain a value for that key, `None` is returned
     /// instead.
     pub fn remove(&self, idx: usize) -> Option<T> {
-        let tid: Tid<C> = idx.unpack();
+        let tid = C::unpack_tid(idx);
         #[cfg(test)]
         println!("rm {:?}", tid);
         if tid.is_current() {
@@ -132,7 +124,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// assert_eq!(slab.get(12345), None);
     /// ```
     pub fn get(&self, key: usize) -> Option<&T> {
-        let tid: Tid<C> = key.unpack();
+        let tid = C::unpack_tid(key);
         #[cfg(test)]
         println!("get {:?}", tid);
         self.shards
@@ -198,11 +190,6 @@ impl<T, C: cfg::Config> Shard<T, C> {
         }
     }
 
-    #[inline(always)]
-    fn unpack_addr(idx: usize) -> page::Addr<C> {
-        page::Addr::from_packed(idx)
-    }
-
     fn insert(&mut self, value: T) -> Option<usize> {
         debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
 
@@ -234,7 +221,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
 
     fn get(&self, idx: usize) -> Option<&T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let addr = Self::unpack_addr(idx);
+        let addr = C::unpack_addr(idx);
         let i = addr.index();
         #[cfg(test)]
         println!("-> {:?}; idx {:?}", addr, i);
@@ -244,7 +231,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     fn remove_local(&mut self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let addr = Self::unpack_addr(idx);
+        let addr = C::unpack_addr(idx);
 
         #[cfg(test)]
         println!("-> remove_local {:?}", addr);
@@ -260,7 +247,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     fn remove_remote(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::<C>::current().as_usize() != self.tid);
-        let addr = Self::unpack_addr(idx);
+        let addr = C::unpack_addr(idx);
 
         #[cfg(test)]
         println!("-> remove_remote {:?}", addr);
@@ -308,16 +295,6 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
     }
 }
 
-/// Token bit allocation:
-/// ```text
-///
-/// 32-bit:
-///  rggg_gttt_ttti_iiio_oooo_oooo_oooo_oooo
-///   │    │      │    └─────────page offset
-///   │    │      └───────────────page index
-///   │    └───────────────────────thread id
-///   └───────────────────────────generation
-/// ```
 pub(crate) trait Pack<C: cfg::Config>: Sized {
     const LEN: usize;
 
@@ -365,17 +342,6 @@ impl<C: cfg::Config> Pack<C> for () {
 
     fn from_packed(_from: usize) -> Self {
         unreachable!()
-    }
-}
-
-pub(crate) trait Unpack<C, T> {
-    fn unpack(self) -> T;
-}
-
-impl<C: cfg::Config, T: Pack<C>> Unpack<C, T> for usize {
-    #[inline(always)]
-    fn unpack(self) -> T {
-        T::from_packed(self)
     }
 }
 

@@ -46,9 +46,7 @@ pub(crate) trait CfgPrivate: Config {
             Self::debug()
         );
     }
-}
 
-pub(crate) trait Unpack: Config {
     #[inline(always)]
     fn unpack<A: Pack<Self>>(packed: usize) -> A {
         A::from_packed(packed)
@@ -69,8 +67,6 @@ pub(crate) trait Unpack: Config {
         Self::unpack(packed)
     }
 }
-
-impl<C: Config> Unpack for C {}
 impl<C: Config> CfgPrivate for C {}
 
 #[derive(Copy, Clone)]

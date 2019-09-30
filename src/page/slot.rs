@@ -2,7 +2,10 @@ use crate::sync::{
     atomic::{AtomicUsize, Ordering},
     CausalCell,
 };
-use crate::{cfg, Pack, Tid, Unpack};
+use crate::{
+    cfg::{self, CfgPrivate},
+    Pack, Tid,
+};
 use std::{fmt, marker::PhantomData};
 
 pub(crate) struct Slot<T, C> {
@@ -60,8 +63,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
         }
     }
 
-    pub(in crate::page) fn get(&self, gen: impl Unpack<C, Generation<C>>) -> Option<&T> {
-        let gen = gen.unpack();
+    pub(in crate::page) fn get(&self, gen: usize) -> Option<&T> {
+        let gen = C::unpack_gen(gen);
         #[cfg(test)]
         println!("-> get {:?}; current={:?}", gen, self.gen);
         if gen != self.gen {
@@ -95,12 +98,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.next.load(Ordering::Acquire)
     }
 
-    pub(in crate::page) fn remove(
-        &self,
-        gen: impl Unpack<C, Generation<C>>,
-        next: usize,
-    ) -> Option<T> {
-        let gen = gen.unpack();
+    pub(in crate::page) fn remove(&self, gen: usize, next: usize) -> Option<T> {
+        let gen = C::unpack_gen(gen);
 
         #[cfg(test)]
         println!("-> remove={:?}; current={:?}", gen, self.gen);
