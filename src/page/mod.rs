@@ -68,6 +68,7 @@ impl<T, C: cfg::Config> Page<T, C> {
         }
     }
 
+    #[inline]
     pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
         let head = self.local_head;
         #[cfg(test)]
@@ -88,14 +89,15 @@ impl<T, C: cfg::Config> Page<T, C> {
             let index = head + self.prev_sz;
             #[cfg(test)]
             println!("insert at offset: {}", index);
-            Some(gen.pack(head + self.prev_sz))
-        } else {
-            #[cfg(test)]
-            println!("-> NULL! {:?}", head);
-            None
+            return Some(gen.pack(index));
         }
+
+        #[cfg(test)]
+        println!("-> NULL! {:?}", head);
+        None
     }
 
+    #[inline]
     pub(crate) fn get(&self, idx: usize) -> Option<&T> {
         let poff = C::unpack_addr(idx).offset() - self.prev_sz;
         #[cfg(test)]
@@ -138,7 +140,7 @@ impl<T, C: cfg::Config> Page<T, C> {
         self.slab.iter().filter_map(Slot::value)
     }
 
-    #[inline]
+    #[inline(always)]
     fn push_remote(&self, offset: usize) -> usize {
         loop {
             let next = self.remote_head.load(Ordering::Relaxed);

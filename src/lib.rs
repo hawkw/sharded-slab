@@ -197,9 +197,9 @@ impl<T, C: cfg::Config> Shard<T, C> {
         debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
 
         let mut value = Some(value);
-        for (_pidx, page) in self.pages.iter_mut().enumerate() {
-            #[cfg(test)]
-            println!("-> Index({:?}) ", _pidx);
+        for page in self.pages.iter_mut() {
+            // #[cfg(test)]
+            // println!("-> Index({:?}) ", _pidx);
             if let Some(poff) = page.insert(&mut value) {
                 return Some(poff);
             }
@@ -222,6 +222,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         Some(poff)
     }
 
+    #[inline]
     fn get(&self, idx: usize) -> Option<&T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let addr = C::unpack_addr(idx);
@@ -310,6 +311,7 @@ pub(crate) trait Pack<C: cfg::Config>: Sized {
     fn as_usize(&self) -> usize;
     fn from_usize(val: usize) -> Self;
 
+    #[inline(always)]
     fn pack(&self, to: usize) -> usize {
         let value = self.as_usize();
         debug_assert!(value <= Self::BITS);
@@ -317,6 +319,7 @@ pub(crate) trait Pack<C: cfg::Config>: Sized {
         (to & !Self::MASK) | (value << Self::SHIFT)
     }
 
+    #[inline(always)]
     fn from_packed(from: usize) -> Self {
         let value = (from & Self::MASK) >> Self::SHIFT;
         debug_assert!(value <= Self::BITS);

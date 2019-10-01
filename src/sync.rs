@@ -2,7 +2,7 @@ pub(crate) use self::inner::*;
 
 #[cfg(test)]
 mod inner {
-    pub(crate) use loom::sync::{CausalCell};
+    pub(crate) use loom::sync::CausalCell;
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -12,7 +12,7 @@ mod inner {
 #[cfg(not(test))]
 mod inner {
     use std::cell::UnsafeCell;
-    pub(crate) use std::sync::{atomic};
+    pub(crate) use std::sync::atomic;
 
     #[derive(Debug)]
     pub struct CausalCell<T>(UnsafeCell<T>);
@@ -22,6 +22,7 @@ mod inner {
             CausalCell(UnsafeCell::new(data))
         }
 
+        #[inline(always)]
         pub fn with<F, R>(&self, f: F) -> R
         where
             F: FnOnce(*const T) -> R,
@@ -29,6 +30,7 @@ mod inner {
             f(self.0.get())
         }
 
+        #[inline(always)]
         pub fn with_mut<F, R>(&self, f: F) -> R
         where
             F: FnOnce(*mut T) -> R,

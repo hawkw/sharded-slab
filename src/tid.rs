@@ -49,10 +49,12 @@ impl<C: cfg::Config> Pack<C> for Tid<C> {
 
     type Prev = page::Addr<C>;
 
+    #[inline(always)]
     fn as_usize(&self) -> usize {
         self.id
     }
 
+    #[inline(always)]
     fn from_usize(id: usize) -> Self {
         debug_assert!(id <= Self::BITS);
         Self {
@@ -140,6 +142,7 @@ impl Registration {
         Self(Cell::new(None))
     }
 
+    #[inline(always)]
     fn current<C: cfg::Config>(&self) -> Tid<C> {
         if let Some(tid) = self.0.get().map(Tid::new) {
             tid
@@ -150,17 +153,12 @@ impl Registration {
 
     #[cold]
     fn register<C: cfg::Config>(&self) -> Tid<C> {
-        let next = REGISTRY.next.fetch_add(1, Ordering::AcqRel);
-        let id = if next >= Tid::<C>::BITS {
-            REGISTRY
-                .free
-                .lock()
-                .ok()
-                .and_then(|mut free| free.pop_front())
-                .expect("maximum thread IDs reached!")
-        } else {
-            next
-        };
+        let id = REGISTRY
+            .free
+            .lock()
+            .ok()
+            .and_then(|mut free| free.pop_front())
+            .unwrap_or_else(|| REGISTRY.next.fetch_add(1, Ordering::AcqRel));
         debug_assert!(id <= Tid::<C>::BITS, "thread ID overflow!");
         self.0.set(Some(id));
         Tid::new(id)

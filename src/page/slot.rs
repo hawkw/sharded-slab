@@ -46,7 +46,7 @@ impl<C: cfg::Config> Generation<C> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn advance(&mut self) -> Self {
         self.value = (self.value + 1) % Self::BITS;
         debug_assert!(self.value <= Self::BITS);
@@ -63,6 +63,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
         }
     }
 
+    #[inline(always)]
     pub(in crate::page) fn get(&self, gen: usize) -> Option<&T> {
         let gen = C::unpack_gen(gen);
         #[cfg(test)]
@@ -78,6 +79,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
+    #[inline(always)]
     pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
         debug_assert!(
             self.item.with(|item| unsafe { (*item).is_none() }),
