@@ -6,6 +6,7 @@ A lock-free concurrent slab.
 [![Documentation][docs-badge]][docs-url]
 [![CI Status][ci-badge]][ci-url]
 [![GitHub License][license-badge]][license]
+![maintenance status][maint-badge]
 
 [crates-badge]: https://img.shields.io/crates/v/sharded-slab.svg
 [crates-url]: https://crates.io/crates/sharded-slab
@@ -15,6 +16,7 @@ A lock-free concurrent slab.
 [ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
 [license-badge]: https://img.shields.io/crates/l/sharded-slab
 [license]: LICENSE
+[maint-badge]: https://img.shields.io/badge/maintenance-experimental-blue.svg
 
 Slabs provide pre-allocated storage for many instances of a single data
 type. When a large number of values of a single type are required,
@@ -23,6 +25,10 @@ allocated items are the same size, memory fragmentation is reduced, and
 creating and removing new items can be very cheap.
 
 This crate implements a lock-free concurrent slab, indexed by `usize`s.
+
+**Note**: This crate is currently experimental. Please feel free to use it in
+your projects, but bear in mind that there's still plenty of room for
+optimization, and there may still be some lurking bugs.
 
 ## Usage
 
