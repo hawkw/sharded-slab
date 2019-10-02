@@ -10,6 +10,9 @@ readme = "README.md"
 license = "MIT"
 keywords = ["slab", "allocator", "lock-free", "atomic"]
 categories = ["memory-management", "data-structures", "concurrency"]
+description = """
+A lock-free concurrent slab.
+"""
 
 [badges]
 maintenance = { status = "experimental" }
