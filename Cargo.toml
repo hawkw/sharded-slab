@@ -3,8 +3,16 @@ name = "sharded-slab"
 version = "0.0.1"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
 edition = "2018"
-
+documentation = "https://docs.rs/sharded-slab/0.0.1/sharded_slab"
+homepage = "https://github.com/hawkw/sharded-slab"
+repository = "https://github.com/hawkw/sharded-slab"
+readme = "README.md"
 license = "MIT"
+keywords = ["slab", "allocator", "lock-free", "atomic"]
+categories = ["memory-management", "data-structures", "concurrency"]
+
+[[badges]]
+maintenance = { status = "experimental" }
 
 [[bench]]
 name = "bench"
@@ -18,6 +26,3 @@ loom = "0.2"
 proptest = "0.9.4"
 criterion = "0.3"
 slab = "0.4.2"
-
-[patch.crates-io]
-loom = { git = "https://github.com/carllerche/loom" }

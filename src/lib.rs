@@ -100,7 +100,6 @@
 //!
 //! [`slab`]: https://crates.io/crates/loom
 //!
-//!
 //! # Safety and Correctness
 //!
 //! Most implementations of lock-free data structures in Rust require some
@@ -158,9 +157,12 @@
 //! [`criterion`]: https://crates.io/crates/criterion
 //!
 //! # Implementation Notes
+//!
 //! See [this page](implementation/index.html) for details on this crate's design
 //! and implementation.
 //!
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.1")]
+
 #[cfg(test)]
 macro_rules! thread_local {
     ($($tts:tt)+) => { loom::thread_local!{ $($tts)+ } }
