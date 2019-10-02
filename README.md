@@ -1,14 +1,20 @@
 # sharded-slab
 
+A lock-free concurrent slab.
+
+[![Crates.io][crates-badge]][crates-url]
+[![Documentation][docs-badge]][docs-url]
 [![CI Status][ci-badge]][ci-url]
 [![GitHub License][license-badge]][license]
 
+[crates-badge]: https://img.shields.io/crates/v/sharded-slab.svg
+[crates-url]: https://crates.io/crates/sharded-slab
+[docs-badge]: https://docs.rs/sharded-slab/badge.svg
+[docs-url]: https://docs.rs/sharded-slab/0.0.1/sharded_slab
 [ci-badge]: https://github.com/hawkw/sharded-slab/workflows/ci/badge.svg
 [ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
 [license-badge]: https://img.shields.io/github/license/hawkw/sharded-slab
 [license]: LICENSE
-
-A lock-free concurrent slab.
 
 Slabs provide pre-allocated storage for many instances of a single data
 type. When a large number of values of a single type are required,
@@ -139,6 +145,31 @@ generous when configuring the allocation of index bits.
 
 [`loom`]: https://crates.io/crates/loom
 [aba]: https://en.wikipedia.org/wiki/ABA_problem
+
+## Performance
+
+These graphs were produced by [`criterion` benchmarks][bench] of the sharded
+slab implementation.
+
+The first shows the results of a benchmark where an increasing number of
+items are inserted and then removed into a slab concurrently by five
+threads. It compares the performance of the sharded slab implementation
+with a `RwLock<slab::Slab>`:
+
+<img width="1124" alt="Screen Shot 2019-10-01 at 5 09 49 PM" src="https://user-images.githubusercontent.com/2796466/66078398-cd6c9f80-e516-11e9-9923-0ed6292e8498.png">
+
+The second graph shows the results of a benchmark where an increasing
+number of items are inserted and then removed by a _single_ thread. It
+compares the performance of the sharded slab implementation with an
+`RwLock<slab::Slab>` and a `mut slab::Slab`.
+
+<img width="925" alt="Screen Shot 2019-10-01 at 5 13 45 PM" src="https://user-images.githubusercontent.com/2796466/66078469-f0974f00-e516-11e9-95b5-f65f0aa7e494.png">
+
+These benchmarks demonstrate that, while the sharded approach introduces
+a small constant-factor overhead, it offers significantly better
+performance across concurrent accesses.
+
+[bench]: https://github.com/hawkw/sharded-slab/blob/master/benches/bench.rs
 
 ## License
 
