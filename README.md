@@ -3,7 +3,7 @@
 [![CI Status][ci-badge]][ci-url]
 [![GitHub License][license-badge]][license]
 
-[ci-badge]: https://github.com/hawkw/sharded-slab/workflows/CI/badge.svg
+[ci-badge]: https://github.com/hawkw/sharded-slab/workflows/ci/badge.svg
 [ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
 [license-badge]: https://img.shields.io/github/license/hawkw/sharded-slab
 [license]: LICENSE
@@ -87,29 +87,29 @@ assert_eq!(hello.as_str(), "hello everyone!");
 ## Comparison with Similar Crates
 
 - [`slab`]: Carl Lerche's `slab` crate provides a slab implementation with a
- similar API, implemented by storing all data in a single vector.
+  similar API, implemented by storing all data in a single vector.
 
- Unlike `sharded-slab`, inserting and removing elements from the slab
- requires  mutable access. This means that if the slab is accessed
- concurrently by multiple threads, it is necessary for it to be protected
- by a `Mutex` or `RwLock`. Items may not be inserted or removed (or
- accessed, if a `Mutex` is used) concurrently, even when they are
- unrelated. In many cases, the lock can become a significant bottleneck. On
- the other hand, this crate allows separate indices in the slab to be
- accessed, inserted, and removed concurrently without requiring a global
- lock. Therefore, when the slab is shared across multiple threads, this
- crate offers significantly better performance than `slab`.
+  Unlike `sharded-slab`, inserting and removing elements from the slab
+  requires  mutable access. This means that if the slab is accessed
+  concurrently by multiple threads, it is necessary for it to be protected
+  by a `Mutex` or `RwLock`. Items may not be inserted or removed (or
+  accessed, if a `Mutex` is used) concurrently, even when they are
+  unrelated. In many cases, the lock can become a significant bottleneck. On
+  the other hand, this crate allows separate indices in the slab to be
+  accessed, inserted, and removed concurrently without requiring a global
+  lock. Therefore, when the slab is shared across multiple threads, this
+  crate offers significantly better performance than `slab`.
 
- However, the lock free slab introduces some additional constant-factor
- overhead. This means that in use-cases where a slab is _not_ shared by
- multiple threads and locking is not required, this crate will likely offer
- slightly worse performance.
+  However, the lock free slab introduces some additional constant-factor
+  overhead. This means that in use-cases where a slab is _not_ shared by
+  multiple threads and locking is not required, this crate will likely offer
+  slightly worse performance.
 
- In summary: `sharded-slab` offers significantly improved performance in
- concurrent use-cases, while `slab` should be preferred in single-threaded
- use-cases.
+  In summary: `sharded-slab` offers significantly improved performance in
+  concurrent use-cases, while `slab` should be preferred in single-threaded
+  use-cases.
 
-[`slab`]: https://crates.io/crates/loom
+[`slab`]: https://crates.io/crates/slab
 
 ## Safety and Correctness
 
@@ -139,3 +139,13 @@ generous when configuring the allocation of index bits.
 
 [`loom`]: https://crates.io/crates/loom
 [aba]: https://en.wikipedia.org/wiki/ABA_problem
+
+## License
+
+This project is licensed under the [MIT license](LICENSE).
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project by you, shall be licensed as MIT, without any
+additional terms or conditions.
