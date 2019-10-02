@@ -11,7 +11,7 @@ license = "MIT"
 keywords = ["slab", "allocator", "lock-free", "atomic"]
 categories = ["memory-management", "data-structures", "concurrency"]
 
-[[badges]]
+[badges]
 maintenance = { status = "experimental" }
 
 [[bench]]
