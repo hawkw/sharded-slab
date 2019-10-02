@@ -11,9 +11,9 @@ A lock-free concurrent slab.
 [crates-url]: https://crates.io/crates/sharded-slab
 [docs-badge]: https://docs.rs/sharded-slab/badge.svg
 [docs-url]: https://docs.rs/sharded-slab/0.0.1/sharded_slab
-[ci-badge]: https://github.com/hawkw/sharded-slab/workflows/ci/badge.svg
+[ci-badge]: https://github.com/hawkw/sharded-slab/workflows/CI/badge.svg
 [ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
-[license-badge]: https://img.shields.io/github/license/hawkw/sharded-slab
+[license-badge]: https://img.shields.io/crates/l/sharded-slab
 [license]: LICENSE
 
 Slabs provide pre-allocated storage for many instances of a single data
@@ -148,8 +148,8 @@ generous when configuring the allocation of index bits.
 
 ## Performance
 
-These graphs were produced by [`criterion` benchmarks][bench] of the sharded
-slab implementation.
+These graphs were produced by [benchmarks] of the sharded slab implementation,
+using the [`criterion`] crate.
 
 The first shows the results of a benchmark where an increasing number of
 items are inserted and then removed into a slab concurrently by five
@@ -169,7 +169,8 @@ These benchmarks demonstrate that, while the sharded approach introduces
 a small constant-factor overhead, it offers significantly better
 performance across concurrent accesses.
 
-[bench]: https://github.com/hawkw/sharded-slab/blob/master/benches/bench.rs
+[benchmarks]: https://github.com/hawkw/sharded-slab/blob/master/benches/bench.rs
+[`criterion`]: https://crates.io/crates/criterion
 
 ## License
 
