@@ -9,7 +9,7 @@ pub(crate) struct Slot<T, C, P> {
     #[cfg(feature = "pool")]
     pooled: CausalCell<P>,
     #[cfg(not(feature = "pool"))]
-    _nopool: PhantomData<fn(P)>,
+    _nopool: PhantomData<P>,
     /// ABA guard generation counter incremented every time a value is inserted
     /// into the slot.
     gen: Generation<C>,
@@ -65,114 +65,105 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
-impl<T, C: cfg::Config, P> Slot<T, C, P> {
-    pub(in crate::page) fn new(next: usize) -> Self {
-        Self {
+cfg_prefix! {
+    #[cfg(feature = "pool")](impl<T, C: cfg::Config, P: Default + crate::pool::Clear> Slot<T, C, P>)
+    #[cfg(else)](impl<T, C: cfg::Config, P> Slot<T, C, P>)
+    {
+        pub(in crate::page) fn new(next: usize) -> Self {
+            Self {
+                #[cfg(feature = "pool")]
+                pooled: P::new(),
+                #[cfg(not(feature = "pool"))]
+                _nopool: PhantomData,
+                gen: Generation::new(0),
+                item: CausalCell::new(None),
+                next: AtomicUsize::new(next),
+            }
+        }
+
+        #[inline(always)]
+        pub(in crate::page) fn get(&self, gen: Generation<C>) -> Option<&T> {
+            #[cfg(test)]
+            println!("-> get {:?}; current={:?}", gen, self.gen);
+
+            // Is the index's generation the same as the current generation? If not,
+            // the item that index referred to was removed, so return `None`.
+            if gen != self.gen {
+                return None;
+            }
+
+            self.value()
+        }
+
+        #[cfg(feature = "pool")]
+        pub(in crate::page) fn get_pooled(&self, gen: Generation<C>) -> Option<&P>
+        where
+            P: crate::pool::Clear + Default,
+        {
+            #[cfg(test)]
+            println!("-> get_pooled {:?}; current={:?}", gen, self.gen);
+
+            // Is the index's generation the same as the current generation? If not,
+            // the item that index referred to was removed, so return `None`.
+            if gen != self.gen {
+                return None;
+            }
+
+            self.pooled.with(|p| unsafe { &*p })
+        }
+
+        #[inline(always)]
+        pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
+            self.item.with(|item| unsafe { (&*item).as_ref() })
+        }
+
+        pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
+            debug_assert!(
+                self.item.with(|item| unsafe { (*item).is_none() }),
+                "inserted into full slot"
+            );
+            debug_assert!(value.is_some(), "inserted twice");
+
+            // Advance the slot's generation by one, returning the new generation.
+            let gen = self.gen.advance();
+            #[cfg(test)]
+            println!("-> {:?}", gen);
+
+            // Set the new value.
+            self.item.with_mut(|item| unsafe {
+                *item = value.take();
+            });
+
             #[cfg(feature = "pool")]
-            pooled: CausalCell::new(P::default()),
-            #[cfg(not(feature = "pool"))]
-            _nopool: PhantomData,
-            gen: Generation::new(0),
-            item: CausalCell::new(None),
-            next: AtomicUsize::new(next),
-        }
-    }
+            self.pooled.with_mut(|p| unsafe { (*p).clear() });
 
-    #[inline(always)]
-    pub(in crate::page) fn get(&self, gen: Generation<C>) -> Option<&T> {
-        #[cfg(test)]
-        println!("-> get {:?}; current={:?}", gen, self.gen);
-
-        // Is the index's generation the same as the current generation? If not,
-        // the item that index referred to was removed, so return `None`.
-        if gen != self.gen {
-            return None;
+            gen
         }
 
-        self.value()
-    }
-
-    #[cfg(feature = "pool")]
-    pub(in crate::page) fn get_pooled(&self, gen: Generation<C>) -> Option<&P>
-    where
-        C: crate::pool::Clear,
-    {
-        #[cfg(test)]
-        println!("-> get_pooled {:?}; current={:?}", gen, self.gen);
-
-        // Is the index's generation the same as the current generation? If not,
-        // the item that index referred to was removed, so return `None`.
-        if gen != self.gen {
-            return None;
+        pub(in crate::page) fn next(&self) -> usize {
+            self.next.load(Ordering::Acquire)
         }
 
-        self.pooled.with(|p| unsafe { &*p })
-    }
+        pub(in crate::page) fn remove(&self, gen: Generation<C>, next: usize) -> Option<T> {
+            #[cfg(test)]
+            println!("-> remove={:?}; current={:?}", gen, self.gen);
 
-    #[inline(always)]
-    pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
-        self.item.with(|item| unsafe { (&*item).as_ref() })
-    }
+            // Is the index's generation the same as the current generation? If not,
+            // the item that index referred to was already removed.
+            if gen != self.gen {
+                return None;
+            }
 
-    #[inline(always)]
-    fn insert_inner(&mut self, value: &mut Option<T>) -> Generation<C> {
-        debug_assert!(
-            self.item.with(|item| unsafe { (*item).is_none() }),
-            "inserted into full slot"
-        );
-        debug_assert!(value.is_some(), "inserted twice");
+            let val = self.item.with_mut(|item| unsafe { (*item).take() });
+            debug_assert!(val.is_some());
 
-        // Set the new value.
-        self.item.with_mut(|item| unsafe {
-            *item = value.take();
-        });
-
-        // Advance the slot's generation by one, returning the new generation.
-        let gen = self.gen.advance();
-        #[cfg(test)]
-        println!("-> {:?}", gen);
-        gen
-    }
-
-    #[cfg(not(feature = "pool"))]
-    #[inline(always)]
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
-        self.insert_inner(value)
-    }
-
-    #[cfg(feature = "pool")]
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C>
-    where
-        P: crate::pool::Clear,
-    {
-        let gen = self.insert_inner(value)?;
-        self.pooled.with_mut(|p| unsafe { (*p).clear() });
-        gen
-    }
-
-    pub(in crate::page) fn next(&self) -> usize {
-        self.next.load(Ordering::Acquire)
-    }
-
-    pub(in crate::page) fn remove(&self, gen: Generation<C>, next: usize) -> Option<T> {
-        #[cfg(test)]
-        println!("-> remove={:?}; current={:?}", gen, self.gen);
-
-        // Is the index's generation the same as the current generation? If not,
-        // the item that index referred to was already removed.
-        if gen != self.gen {
-            return None;
+            self.next.store(next, Ordering::Release);
+            val
         }
-
-        let val = self.item.with_mut(|item| unsafe { (*item).take() });
-        debug_assert!(val.is_some());
-
-        self.next.store(next, Ordering::Release);
-        val
     }
 }
 
-impl<C, T> fmt::Debug for Slot<C, T> {
+impl<T, C, P> fmt::Debug for Slot<T, C, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slot")
             .field("gen", &self.gen)

@@ -53,126 +53,139 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, C> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
+pub(crate) type Iter<'a, T, C, P> = std::iter::FilterMap<
+    std::slice::Iter<'a, Slot<T, C, P>>,
+    fn(&'a Slot<T, C, P>) -> Option<&'a T>,
+>;
 
-pub(crate) struct Page<T, C> {
+pub(crate) struct Page<T, C, P> {
     prev_sz: usize,
     remote_head: AtomicUsize,
     local_head: usize,
-    slab: Box<[Slot<T, C>]>,
+    slab: Box<[Slot<T, C, P>]>,
 }
 
-impl<T, C: cfg::Config, P> Page<T, C, P>
-where
-    { #[cfg(feature = "pool")] P: crate::clear::Clear, }
-{
-    const NULL: usize = Addr::<C>::NULL;
+cfg_prefix! {
+    #[cfg(feature = "pool")](impl<T, C: cfg::Config, P: Default + crate::pool::Clear> Page<T, C, P>)
+    #[cfg(else)](impl<T, C: cfg::Config, P> Page<T, C, P>)
+    {
+        const NULL: usize = Addr::<C>::NULL;
 
-    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
-        let mut slab = Vec::with_capacity(size);
-        slab.extend((1..size).map(Slot::new));
-        slab.push(Slot::new(Self::NULL));
-        Self {
-            prev_sz,
-            remote_head: AtomicUsize::new(Self::NULL),
-            local_head: 0,
-            slab: slab.into_boxed_slice(),
-        }
-    }
-
-    #[inline]
-    pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
-        let head = self.local_head;
-        #[cfg(test)]
-        println!("-> local head {:?}", head);
-
-        // are there any items on the local free list? (fast path)
-        let head = if head < self.slab.len() {
-            head
-        } else {
-            // if the local free list is empty, pop all the items on the remote
-            // free list onto the local free list.
-            let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
-            #[cfg(test)]
-            println!("-> remote head {:?}", head);
-            head
-        };
-
-        // if the head is still null, both the local and remote free lists are
-        // empty --- we can't fit any more items on this page.
-        if head == Self::NULL {
-            #[cfg(test)]
-            println!("-> NULL! {:?}", head);
-            return None;
-        }
-
-        let slot = &mut self.slab[head];
-        let gen = slot.insert(t);
-        self.local_head = slot.next();
-        let index = head + self.prev_sz;
-        #[cfg(test)]
-        println!("insert at offset: {}", index);
-        Some(gen.pack(index))
-    }
-
-    #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<&T> {
-        let poff = addr.offset() - self.prev_sz;
-        #[cfg(test)]
-        println!("-> offset {:?}", poff);
-
-        self.slab.get(poff)?.get(C::unpack_gen(idx))
-    }
-
-    pub(crate) fn remove_local(&mut self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
-        let offset = addr.offset() - self.prev_sz;
-
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
-
-        let val = self.slab.get(offset)?.remove(gen, self.local_head);
-        self.local_head = offset;
-        val
-    }
-
-    pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
-        let offset = addr.offset() - self.prev_sz;
-
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
-
-        let next = self.push_remote(offset);
-        #[cfg(test)]
-        println!("-> next={:?}", next);
-
-        self.slab.get(offset)?.remove(gen, next)
-    }
-
-    pub(crate) fn total_capacity(&self) -> usize {
-        self.slab.len()
-    }
-
-    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C> {
-        self.slab.iter().filter_map(Slot::value)
-    }
-
-    #[inline(always)]
-    fn push_remote(&self, offset: usize) -> usize {
-        loop {
-            let next = self.remote_head.load(Ordering::Relaxed);
-            let actual = self
-                .remote_head
-                .compare_and_swap(next, offset, Ordering::Release);
-            if actual == next {
-                return next;
+        pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
+            let mut slab = Vec::with_capacity(size);
+            slab.extend((1..size).map(Slot::new));
+            slab.push(Slot::new(Self::NULL));
+            Self {
+                prev_sz,
+                remote_head: AtomicUsize::new(Self::NULL),
+                local_head: 0,
+                slab: slab.into_boxed_slice(),
             }
-            spin_loop_hint();
+        }
+
+        #[inline]
+        pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
+            let head = self.local_head;
+            #[cfg(test)]
+            println!("-> local head {:?}", head);
+
+            // are there any items on the local free list? (fast path)
+            let head = if head < self.slab.len() {
+                head
+            } else {
+                // if the local free list is empty, pop all the items on the remote
+                // free list onto the local free list.
+                let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
+                #[cfg(test)]
+                println!("-> remote head {:?}", head);
+                head
+            };
+
+            // if the head is still null, both the local and remote free lists are
+            // empty --- we can't fit any more items on this page.
+            if head == Self::NULL {
+                #[cfg(test)]
+                println!("-> NULL! {:?}", head);
+                return None;
+            }
+
+            let slot = &mut self.slab[head];
+            let gen = slot.insert(t);
+            self.local_head = slot.next();
+            let index = head + self.prev_sz;
+            #[cfg(test)]
+            println!("insert at offset: {}", index);
+            Some(gen.pack(index))
+        }
+
+        #[inline]
+        pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<&T> {
+            let poff = addr.offset() - self.prev_sz;
+            #[cfg(test)]
+            println!("-> offset {:?}", poff);
+
+            self.slab.get(poff)?.get(C::unpack_gen(idx))
+        }
+
+        #[inline]
+        #[cfg(feature = "pool")]
+        pub(crate) fn get_pooled(&self, addr: Addr<C>, idx: usize) -> Option<&P> {
+            let poff = addr.offset() - self.prev_sz;
+            #[cfg(test)]
+            println!("-> offset {:?}", poff);
+
+            self.slab.get(poff)?.get_pooled(C::unpack_gen(idx))
+        }
+
+        pub(crate) fn remove_local(&mut self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
+            let offset = addr.offset() - self.prev_sz;
+
+            #[cfg(test)]
+            println!("-> offset {:?}", offset);
+
+            let val = self.slab.get(offset)?.remove(gen, self.local_head);
+            self.local_head = offset;
+            val
+        }
+
+        pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
+            let offset = addr.offset() - self.prev_sz;
+
+            #[cfg(test)]
+            println!("-> offset {:?}", offset);
+
+            let next = self.push_remote(offset);
+            #[cfg(test)]
+            println!("-> next={:?}", next);
+
+            self.slab.get(offset)?.remove(gen, next)
+        }
+
+        pub(crate) fn total_capacity(&self) -> usize {
+            self.slab.len()
+        }
+
+        pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C, P> {
+            self.slab.iter().filter_map(Slot::value)
+        }
+
+        #[inline(always)]
+        fn push_remote(&self, offset: usize) -> usize {
+            loop {
+                let next = self.remote_head.load(Ordering::Relaxed);
+                let actual = self
+                    .remote_head
+                    .compare_and_swap(next, offset, Ordering::Release);
+                if actual == next {
+                    return next;
+                }
+                spin_loop_hint();
+            }
         }
     }
 }
 
-impl<C, T> fmt::Debug for Page<C, T> {
+impl<T, C, P> fmt::Debug for Page<T, C, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Page")
             .field(

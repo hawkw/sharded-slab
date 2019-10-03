@@ -173,6 +173,20 @@ macro_rules! thread_local {
     ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
 }
 
+macro_rules! cfg_prefix {
+    (
+        #[cfg($($cond:tt)*)]($($pos:tt)*)
+        #[cfg(else)]($($neg:tt)*)
+        $($rest:tt)*
+    ) => {
+        #[cfg($($cond)*)]
+        $($pos)* $($rest)*
+
+        #[cfg(not($($cond)*))]
+        $($neg)* $($rest)*
+    }
+}
+
 pub mod implementation;
 mod page;
 #[cfg(feature = "pool")]
@@ -195,8 +209,8 @@ use std::{fmt, marker::PhantomData};
 /// A sharded slab.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
-pub struct Slab<T, C: cfg::Config = DefaultConfig, P = ()> {
-    shards: Box<[CausalCell<Shard<T, C, P>>]>,
+pub struct Slab<T, C: cfg::Config = DefaultConfig> {
+    shards: Box<[CausalCell<Shard<T, C, ()>>]>,
     _cfg: PhantomData<C>,
 }
 
@@ -225,7 +239,6 @@ struct Shard<T, C: cfg::Config, P> {
     //                      └────────┘
     //                         ...
     pages: Vec<Page<T, C, P>>,
-    pages: Vec<Page<T, C>>,
 }
 
 impl<T> Slab<T> {
@@ -258,7 +271,7 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T, C: cfg::Config, P> Slab<T, C, P> {
+impl<T, C: cfg::Config> Slab<T, C> {
     /// The number of bits in each index which are used by the slab.
     ///
     /// If other data is packed into the `usize` indices returned by
@@ -395,7 +408,7 @@ impl<T, C: cfg::Config, P> Slab<T, C, P> {
     }
 }
 
-impl<T, C: cfg::Config> Shard<T, C> {
+impl<T, C: cfg::Config, P> Shard<T, C, P> {
     fn new(_idx: usize) -> Self {
         Self {
             #[cfg(debug_assertions)]
@@ -453,6 +466,18 @@ impl<T, C: cfg::Config> Shard<T, C> {
         self.pages.get(i)?.get(addr, idx)
     }
 
+    #[inline]
+    #[cfg(feature = "pool")]
+    fn get_pooled(&self, idx: usize) -> Option<&P> {
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let addr = C::unpack_addr(idx);
+        let i = addr.index();
+        #[cfg(test)]
+        println!("-> {:?}; idx {:?}", addr, i);
+        self.pages.get(i)?.get(addr, idx)
+    }
+
     /// Remove an item on the shard's local thread.
     fn remove_local(&mut self, idx: usize) -> Option<T> {
         #[cfg(debug_assertions)]
@@ -501,7 +526,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         self.iter().map(Page::total_capacity).sum()
     }
 
-    fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T, C>> {
+    fn iter<'a>(&'a self) -> std::slice::Iter<'a, Page<T, C, P>> {
         self.pages.iter()
     }
 }
@@ -518,7 +543,7 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
 unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
 unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
-impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
+impl<T: fmt::Debug, P, C: cfg::Config> fmt::Debug for Shard<T, C, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Shard");
 

@@ -18,7 +18,6 @@ A lock-free concurrent slab.
 maintenance = { status = "experimental" }
 
 [features]
-default = ["pool"]
 pool = []
 
 [[bench]]
