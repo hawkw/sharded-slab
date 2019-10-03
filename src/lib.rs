@@ -175,6 +175,8 @@ macro_rules! thread_local {
 
 pub mod implementation;
 mod page;
+#[cfg(feature = "pool")]
+mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -193,12 +195,12 @@ use std::{fmt, marker::PhantomData};
 /// A sharded slab.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
-pub struct Slab<T, C: cfg::Config = DefaultConfig> {
-    shards: Box<[CausalCell<Shard<T, C>>]>,
+pub struct Slab<T, C: cfg::Config = DefaultConfig, P = ()> {
+    shards: Box<[CausalCell<Shard<T, C, P>>]>,
     _cfg: PhantomData<C>,
 }
 
-struct Shard<T, C: cfg::Config> {
+struct Shard<T, C: cfg::Config, P> {
     #[cfg(debug_assertions)]
     tid: usize,
     sz: usize,
@@ -222,6 +224,7 @@ struct Shard<T, C: cfg::Config> {
     //                      │XXXXXXXX│
     //                      └────────┘
     //                         ...
+    pages: Vec<Page<T, C, P>>,
     pages: Vec<Page<T, C>>,
 }
 
@@ -255,7 +258,7 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T, C: cfg::Config> Slab<T, C> {
+impl<T, C: cfg::Config, P> Slab<T, C, P> {
     /// The number of bits in each index which are used by the slab.
     ///
     /// If other data is packed into the `usize` indices returned by

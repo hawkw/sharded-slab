@@ -63,7 +63,10 @@ pub(crate) struct Page<T, C> {
     slab: Box<[Slot<T, C>]>,
 }
 
-impl<T, C: cfg::Config> Page<T, C> {
+impl<T, C: cfg::Config, P> Page<T, C, P>
+where
+    { #[cfg(feature = "pool")] P: crate::clear::Clear, }
+{
     const NULL: usize = Addr::<C>::NULL;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {

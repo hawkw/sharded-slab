@@ -5,7 +5,11 @@ use crate::sync::{
 use crate::{cfg, Pack, Tid};
 use std::{fmt, marker::PhantomData};
 
-pub(crate) struct Slot<T, C> {
+pub(crate) struct Slot<T, C, P> {
+    #[cfg(feature = "pool")]
+    pooled: CausalCell<P>,
+    #[cfg(not(feature = "pool"))]
+    _nopool: PhantomData<fn(P)>,
     /// ABA guard generation counter incremented every time a value is inserted
     /// into the slot.
     gen: Generation<C>,
@@ -61,9 +65,13 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
-impl<T, C: cfg::Config> Slot<T, C> {
+impl<T, C: cfg::Config, P> Slot<T, C, P> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
+            #[cfg(feature = "pool")]
+            pooled: CausalCell::new(P::default()),
+            #[cfg(not(feature = "pool"))]
+            _nopool: PhantomData,
             gen: Generation::new(0),
             item: CausalCell::new(None),
             next: AtomicUsize::new(next),
@@ -84,13 +92,30 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.value()
     }
 
+    #[cfg(feature = "pool")]
+    pub(in crate::page) fn get_pooled(&self, gen: Generation<C>) -> Option<&P>
+    where
+        C: crate::pool::Clear,
+    {
+        #[cfg(test)]
+        println!("-> get_pooled {:?}; current={:?}", gen, self.gen);
+
+        // Is the index's generation the same as the current generation? If not,
+        // the item that index referred to was removed, so return `None`.
+        if gen != self.gen {
+            return None;
+        }
+
+        self.pooled.with(|p| unsafe { &*p })
+    }
+
     #[inline(always)]
     pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
     #[inline(always)]
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
+    fn insert_inner(&mut self, value: &mut Option<T>) -> Generation<C> {
         debug_assert!(
             self.item.with(|item| unsafe { (*item).is_none() }),
             "inserted into full slot"
@@ -106,6 +131,22 @@ impl<T, C: cfg::Config> Slot<T, C> {
         let gen = self.gen.advance();
         #[cfg(test)]
         println!("-> {:?}", gen);
+        gen
+    }
+
+    #[cfg(not(feature = "pool"))]
+    #[inline(always)]
+    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
+        self.insert_inner(value)
+    }
+
+    #[cfg(feature = "pool")]
+    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C>
+    where
+        P: crate::pool::Clear,
+    {
+        let gen = self.insert_inner(value)?;
+        self.pooled.with_mut(|p| unsafe { (*p).clear() });
         gen
     }
 

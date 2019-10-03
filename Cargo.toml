@@ -17,6 +17,10 @@ A lock-free concurrent slab.
 [badges]
 maintenance = { status = "experimental" }
 
+[features]
+default = ["pool"]
+pool = []
+
 [[bench]]
 name = "bench"
 harness = false
