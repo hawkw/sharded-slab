@@ -1,9 +1,9 @@
 [package]
 name = "sharded-slab"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
 edition = "2018"
-documentation = "https://docs.rs/sharded-slab/0.0.1/sharded_slab"
+documentation = "https://docs.rs/sharded-slab/0.0.2/sharded_slab"
 homepage = "https://github.com/hawkw/sharded-slab"
 repository = "https://github.com/hawkw/sharded-slab"
 readme = "README.md"
