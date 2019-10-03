@@ -161,7 +161,7 @@
 //! See [this page](implementation/index.html) for details on this crate's design
 //! and implementation.
 //!
-#![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.1")]
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.2")]
 
 #[cfg(test)]
 macro_rules! thread_local {
@@ -236,6 +236,7 @@ impl<T> Slab<T> {
         C::validate();
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
 
+        #[allow(unused_mut)]
         let mut idx = 0;
         shards.resize_with(C::MAX_SHARDS, || {
             let shard = Shard::new(idx);
