@@ -236,7 +236,6 @@ impl<T> Slab<T> {
         C::validate();
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
 
-        #[cfg(debug_assertions)]
         let mut idx = 0;
         shards.resize_with(C::MAX_SHARDS, || {
             let shard = Shard::new(idx);
