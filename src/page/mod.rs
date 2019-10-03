@@ -69,8 +69,6 @@ cfg_prefix! {
     #[cfg(feature = "pool")](impl<T, C: cfg::Config, P: Default + crate::pool::Clear> Page<T, C, P>)
     #[cfg(else)](impl<T, C: cfg::Config, P> Page<T, C, P>)
     {
-        const NULL: usize = Addr::<C>::NULL;
-
         pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
             let mut slab = Vec::with_capacity(size);
             slab.extend((1..size).map(Slot::new));
@@ -161,14 +159,6 @@ cfg_prefix! {
             self.slab.get(offset)?.remove(gen, next)
         }
 
-        pub(crate) fn total_capacity(&self) -> usize {
-            self.slab.len()
-        }
-
-        pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C, P> {
-            self.slab.iter().filter_map(Slot::value)
-        }
-
         #[inline(always)]
         fn push_remote(&self, offset: usize) -> usize {
             loop {
@@ -182,6 +172,18 @@ cfg_prefix! {
                 spin_loop_hint();
             }
         }
+    }
+}
+
+impl<T, C: cfg::Config, P> Page<T, C, P> {
+    const NULL: usize = Addr::<C>::NULL;
+
+    pub(crate) fn total_capacity(&self) -> usize {
+        self.slab.len()
+    }
+
+    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C, P> {
+        self.slab.iter().filter_map(Slot::value)
     }
 }
 

@@ -190,7 +190,7 @@ macro_rules! cfg_prefix {
 pub mod implementation;
 mod page;
 #[cfg(feature = "pool")]
-mod pool;
+pub mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -408,116 +408,121 @@ impl<T, C: cfg::Config> Slab<T, C> {
     }
 }
 
-impl<T, C: cfg::Config, P> Shard<T, C, P> {
-    fn new(_idx: usize) -> Self {
-        Self {
-            #[cfg(debug_assertions)]
-            tid: _idx,
-            sz: C::INITIAL_SZ,
-            len: AtomicUsize::new(0),
-            pages: vec![Page::new(C::INITIAL_SZ, 0)],
-        }
-    }
-
-    fn insert(&mut self, value: T) -> Option<usize> {
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
-
-        let mut value = Some(value);
-
-        // Can we fit the value into an existing page?
-        for page in self.pages.iter_mut() {
-            if let Some(poff) = page.insert(&mut value) {
-                self.len.fetch_add(1, Ordering::Relaxed);
-                return Some(poff);
+cfg_prefix! {
+    #[cfg(feature = "pool")](impl<T, C: cfg::Config, P: Default + crate::pool::Clear> Shard<T, C, P>)
+    #[cfg(else)](impl<T, C: cfg::Config, P> Shard<T, C, P>)
+    {
+        fn new(_idx: usize) -> Self {
+            Self {
+                #[cfg(debug_assertions)]
+                tid: _idx,
+                sz: C::INITIAL_SZ,
+                len: AtomicUsize::new(0),
+                pages: vec![Page::new(C::INITIAL_SZ, 0)],
             }
         }
 
-        // If not, can we allocate a new page?
-        let pidx = self.pages.len();
-        if pidx >= C::MAX_PAGES {
-            #[cfg(test)]
-            println!("max pages (len={}, max={})", self.pages.len(), C::MAX_PAGES);
-            // out of pages!
-            return None;
-        }
-
-        // Add new page
-        let sz = C::page_size(pidx);
-        let mut page = Page::new(sz, self.sz);
-        // Increment the total size of the shard, for the next time a new page
-        // allocated.
-        self.sz += sz;
-        let poff = page.insert(&mut value).expect("new page should be empty");
-        self.len.fetch_add(1, Ordering::Relaxed);
-        self.pages.push(page);
-
-        Some(poff)
-    }
-
-    #[inline]
-    fn get(&self, idx: usize) -> Option<&T> {
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let addr = C::unpack_addr(idx);
-        let i = addr.index();
-        #[cfg(test)]
-        println!("-> {:?}; idx {:?}", addr, i);
-        self.pages.get(i)?.get(addr, idx)
-    }
-
-    #[inline]
-    #[cfg(feature = "pool")]
-    fn get_pooled(&self, idx: usize) -> Option<&P> {
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let addr = C::unpack_addr(idx);
-        let i = addr.index();
-        #[cfg(test)]
-        println!("-> {:?}; idx {:?}", addr, i);
-        self.pages.get(i)?.get(addr, idx)
-    }
-
-    /// Remove an item on the shard's local thread.
-    fn remove_local(&mut self, idx: usize) -> Option<T> {
-        #[cfg(debug_assertions)]
-        {
+        fn insert(&mut self, value: T) -> Option<usize> {
+            #[cfg(debug_assertions)]
             debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
-            debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+
+            let mut value = Some(value);
+
+            // Can we fit the value into an existing page?
+            for page in self.pages.iter_mut() {
+                if let Some(poff) = page.insert(&mut value) {
+                    self.len.fetch_add(1, Ordering::Relaxed);
+                    return Some(poff);
+                }
+            }
+
+            // If not, can we allocate a new page?
+            let pidx = self.pages.len();
+            if pidx >= C::MAX_PAGES {
+                #[cfg(test)]
+                println!("max pages (len={}, max={})", self.pages.len(), C::MAX_PAGES);
+                // out of pages!
+                return None;
+            }
+
+            // Add new page
+            let sz = C::page_size(pidx);
+            let mut page = Page::new(sz, self.sz);
+            // Increment the total size of the shard, for the next time a new page
+            // allocated.
+            self.sz += sz;
+            let poff = page.insert(&mut value).expect("new page should be empty");
+            self.len.fetch_add(1, Ordering::Relaxed);
+            self.pages.push(page);
+
+            Some(poff)
         }
-        let addr = C::unpack_addr(idx);
 
-        #[cfg(test)]
-        println!("-> remove_local {:?}", addr);
-        self.pages
-            .get_mut(addr.index())?
-            .remove_local(addr, C::unpack_gen(idx))
-            .map(|item| {
-                self.len.fetch_sub(1, Ordering::Relaxed);
-                item
-            })
-    }
-
-    /// Remove an item, while on a different thread from the shard's local thread.
-    fn remove_remote(&self, idx: usize) -> Option<T> {
-        #[cfg(debug_assertions)]
-        {
+        #[inline]
+        fn get(&self, idx: usize) -> Option<&T> {
+            #[cfg(debug_assertions)]
             debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-            debug_assert!(Tid::<C>::current().as_usize() != self.tid);
+            let addr = C::unpack_addr(idx);
+            let i = addr.index();
+            #[cfg(test)]
+            println!("-> {:?}; idx {:?}", addr, i);
+            self.pages.get(i)?.get(addr, idx)
         }
-        let addr = C::unpack_addr(idx);
 
-        #[cfg(test)]
-        println!("-> remove_remote {:?}", addr);
-        self.pages
-            .get(addr.index())?
-            .remove_remote(addr, C::unpack_gen(idx))
-            .map(|item| {
-                self.len.fetch_sub(1, Ordering::Relaxed);
-                item
-            })
+        #[inline]
+        #[cfg(feature = "pool")]
+        fn get_pooled(&self, idx: usize) -> Option<&P> {
+            #[cfg(debug_assertions)]
+            debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+            let addr = C::unpack_addr(idx);
+            let i = addr.index();
+            #[cfg(test)]
+            println!("-> {:?}; idx {:?}", addr, i);
+            self.pages.get(i)?.get_pooled(addr, idx)
+        }
+
+        /// Remove an item on the shard's local thread.
+        fn remove_local(&mut self, idx: usize) -> Option<T> {
+            #[cfg(debug_assertions)]
+            {
+                debug_assert_eq!(Tid::<C>::current().as_usize(), self.tid);
+                debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+            }
+            let addr = C::unpack_addr(idx);
+
+            #[cfg(test)]
+            println!("-> remove_local {:?}", addr);
+            self.pages
+                .get_mut(addr.index())?
+                .remove_local(addr, C::unpack_gen(idx))
+                .map(|item| {
+                    self.len.fetch_sub(1, Ordering::Relaxed);
+                    item
+                })
+        }
+
+        /// Remove an item, while on a different thread from the shard's local thread.
+        fn remove_remote(&self, idx: usize) -> Option<T> {
+            #[cfg(debug_assertions)]
+            {
+                debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+                debug_assert!(Tid::<C>::current().as_usize() != self.tid);
+            }
+            let addr = C::unpack_addr(idx);
+
+            #[cfg(test)]
+            println!("-> remove_remote {:?}", addr);
+            self.pages
+                .get(addr.index())?
+                .remove_remote(addr, C::unpack_gen(idx))
+                .map(|item| {
+                    self.len.fetch_sub(1, Ordering::Relaxed);
+                    item
+                })
+        }
     }
-
+}
+impl<T, C: cfg::Config, P> Shard<T, C, P> {
     fn len(&self) -> usize {
         self.len.load(Ordering::Relaxed)
     }

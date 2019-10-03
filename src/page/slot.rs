@@ -72,7 +72,7 @@ cfg_prefix! {
         pub(in crate::page) fn new(next: usize) -> Self {
             Self {
                 #[cfg(feature = "pool")]
-                pooled: P::new(),
+                pooled: CausalCell::new(P::default()),
                 #[cfg(not(feature = "pool"))]
                 _nopool: PhantomData,
                 gen: Generation::new(0),
@@ -109,12 +109,7 @@ cfg_prefix! {
                 return None;
             }
 
-            self.pooled.with(|p| unsafe { &*p })
-        }
-
-        #[inline(always)]
-        pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
-            self.item.with(|item| unsafe { (&*item).as_ref() })
+            Some(self.pooled.with(|p| unsafe { &*p }))
         }
 
         pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
@@ -139,27 +134,34 @@ cfg_prefix! {
 
             gen
         }
+    }
+}
 
-        pub(in crate::page) fn next(&self) -> usize {
-            self.next.load(Ordering::Acquire)
+impl<T, C: cfg::Config, P> Slot<T, C, P> {
+    #[inline(always)]
+    pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
+        self.item.with(|item| unsafe { (&*item).as_ref() })
+    }
+
+    pub(in crate::page) fn next(&self) -> usize {
+        self.next.load(Ordering::Acquire)
+    }
+
+    pub(in crate::page) fn remove(&self, gen: Generation<C>, next: usize) -> Option<T> {
+        #[cfg(test)]
+        println!("-> remove={:?}; current={:?}", gen, self.gen);
+
+        // Is the index's generation the same as the current generation? If not,
+        // the item that index referred to was already removed.
+        if gen != self.gen {
+            return None;
         }
 
-        pub(in crate::page) fn remove(&self, gen: Generation<C>, next: usize) -> Option<T> {
-            #[cfg(test)]
-            println!("-> remove={:?}; current={:?}", gen, self.gen);
+        let val = self.item.with_mut(|item| unsafe { (*item).take() });
+        debug_assert!(val.is_some());
 
-            // Is the index's generation the same as the current generation? If not,
-            // the item that index referred to was already removed.
-            if gen != self.gen {
-                return None;
-            }
-
-            let val = self.item.with_mut(|item| unsafe { (*item).take() });
-            debug_assert!(val.is_some());
-
-            self.next.store(next, Ordering::Release);
-            val
-        }
+        self.next.store(next, Ordering::Release);
+        val
     }
 }
 

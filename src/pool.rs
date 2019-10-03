@@ -2,7 +2,7 @@ use super::*;
 use std::sync::{Mutex, RwLock};
 use std::{collections, hash, ops::DerefMut};
 
-/// A sharded slab.
+/// A sharded slab and pool for heap-allocated objects.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
 pub struct Slab<T, P, C: cfg::Config = DefaultConfig> {
@@ -36,7 +36,7 @@ where
     }
 
     /// Returns a new slab with the provided configuration parameters.
-    pub fn new_with_config<C: Config>() -> Slab<T, C, P> {
+    pub fn new_with_config<C: Config>() -> Slab<T, P, C> {
         C::validate();
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
 
@@ -59,7 +59,7 @@ where
     }
 }
 
-impl<T, C, P> Slab<T, C, P>
+impl<T, P, C> Slab<T, P, C>
 where
     P: Default + Clear,
     C: Config,
@@ -223,7 +223,7 @@ where
     }
 }
 
-impl<T: fmt::Debug, C: cfg::Config, P> fmt::Debug for Slab<T, C, P> {
+impl<T: fmt::Debug, C: cfg::Config, P> fmt::Debug for Slab<T, P, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slab")
             // .field("shards", &self.shards)
@@ -232,8 +232,8 @@ impl<T: fmt::Debug, C: cfg::Config, P> fmt::Debug for Slab<T, C, P> {
     }
 }
 
-unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C, P> {}
-unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C, P> {}
+unsafe impl<T: Send, P, C: cfg::Config> Send for Slab<T, P, C> {}
+unsafe impl<T: Sync, P, C: cfg::Config> Sync for Slab<T, P, C> {}
 
 // ===== impl Clear =====
 
