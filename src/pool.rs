@@ -192,7 +192,7 @@ where
     /// assert!(!slab.contains(key));
     /// ```
     pub fn contains(&self, key: usize) -> bool {
-        self.get_shard(key).is_some()
+        self.get_slab(key).is_some()
     }
 
     /// Returns the number of items currently stored in the slab.
