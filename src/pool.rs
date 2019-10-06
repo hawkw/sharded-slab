@@ -125,7 +125,7 @@ where
         }
     }
 
-    /// Return a reference to the value associated with the given key.
+    /// Return a reference to the slab value associated with the given key.
     ///
     /// If the slab does not contain a value for the given key, `None` is
     /// returned instead.
@@ -139,36 +139,43 @@ where
     /// assert_eq!(slab.get(key), Some(&"hello world"));
     /// assert_eq!(slab.get(12345), None);
     /// ```
-    pub fn get(&self, key: usize) -> Option<&T> {
+    pub fn get_slab(&self, key: usize) -> Option<&T> {
         let tid = C::unpack_tid(key);
         #[cfg(test)]
-        println!("get {:?}", tid);
+        println!("get_slab {:?}", tid);
         self.shards
             .get(tid.as_usize())?
             .with(|shard| unsafe { (*shard).get(key) })
     }
 
-    /// Return a reference to the value associated with the given key.
+    /// Return a reference to the pooled value and slab value associated with
+    /// the given key.
     ///
     /// If the slab does not contain a value for the given key, `None` is
     /// returned instead.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// let slab = sharded_slab::Slab::new();
-    /// let key = slab.insert("hello world").unwrap();
-    ///
-    /// assert_eq!(slab.get(key), Some(&"hello world"));
-    /// assert_eq!(slab.get(12345), None);
-    /// ```
-    pub fn get_pooled(&self, key: usize) -> Option<&P> {
+    pub fn get(&self, key: usize) -> Option<(&T, &P)> {
         let tid = C::unpack_tid(key);
         #[cfg(test)]
         println!("get {:?}", tid);
         self.shards
             .get(tid.as_usize())?
             .with(|shard| unsafe { (*shard).get_pooled(key) })
+    }
+
+    /// Return a reference to the pooled value associated with
+    /// the given key.
+    ///
+    /// If the slab does not contain a value for the given key, `None` is
+    /// returned instead.
+    ///
+    pub fn get_pooled(&self, key: usize) -> Option<&P> {
+        let tid = C::unpack_tid(key);
+        #[cfg(test)]
+        println!("get {:?}", tid);
+        self.shards
+            .get(tid.as_usize())?
+            .with(|shard| unsafe { (*shard).get_pooled(key) }).map(|(_, p)| p)
     }
 
     /// Returns `true` if the slab contains a value for the given key.
@@ -185,7 +192,7 @@ where
     /// assert!(!slab.contains(key));
     /// ```
     pub fn contains(&self, key: usize) -> bool {
-        self.get(key).is_some()
+        self.get_shard(key).is_some()
     }
 
     /// Returns the number of items currently stored in the slab.

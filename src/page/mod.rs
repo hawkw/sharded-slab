@@ -127,7 +127,7 @@ cfg_prefix! {
 
         #[inline]
         #[cfg(feature = "pool")]
-        pub(crate) fn get_pooled(&self, addr: Addr<C>, idx: usize) -> Option<&P> {
+        pub(crate) fn get_pooled(&self, addr: Addr<C>, idx: usize) -> Option<(&T, &P)> {
             let poff = addr.offset() - self.prev_sz;
             #[cfg(test)]
             println!("-> offset {:?}", poff);

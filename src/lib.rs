@@ -458,27 +458,28 @@ cfg_prefix! {
             Some(poff)
         }
 
-        #[inline]
-        fn get(&self, idx: usize) -> Option<&T> {
+        #[inline(always)]
+        fn page_idxs(&self, idx: usize) -> (page::Addr<C>, usize) {
             #[cfg(debug_assertions)]
             debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
             let addr = C::unpack_addr(idx);
             let i = addr.index();
             #[cfg(test)]
             println!("-> {:?}; idx {:?}", addr, i);
-            self.pages.get(i)?.get(addr, idx)
+            (addr, i)
+        }
+
+        #[inline]
+        fn get(&self, idx: usize) -> Option<&T> {
+            let (addr, page) = self.page_idxs(idx);
+            self.pages.get(page)?.get(addr, idx)
         }
 
         #[inline]
         #[cfg(feature = "pool")]
-        fn get_pooled(&self, idx: usize) -> Option<&P> {
-            #[cfg(debug_assertions)]
-            debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-            let addr = C::unpack_addr(idx);
-            let i = addr.index();
-            #[cfg(test)]
-            println!("-> {:?}; idx {:?}", addr, i);
-            self.pages.get(i)?.get_pooled(addr, idx)
+        fn get_pooled(&self, idx: usize) -> Option<(&P, &T)> {
+            let (addr, page) = self.page_idxs(idx);
+            self.pages.get(page)?.get_pooled(addr, idx)
         }
 
         /// Remove an item on the shard's local thread.

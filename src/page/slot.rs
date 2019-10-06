@@ -96,7 +96,7 @@ cfg_prefix! {
         }
 
         #[cfg(feature = "pool")]
-        pub(in crate::page) fn get_pooled(&self, gen: Generation<C>) -> Option<&P>
+        pub(in crate::page) fn get_pooled(&self, gen: Generation<C>) -> Option<(&T, &P)>
         where
             P: crate::pool::Clear + Default,
         {
@@ -108,8 +108,9 @@ cfg_prefix! {
             if gen != self.gen {
                 return None;
             }
-
-            Some(self.pooled.with(|p| unsafe { &*p }))
+            let value = self.value()?;
+            let pooled = self.pooled.with(|p| unsafe { &*p });
+            Some((value, pooled))
         }
 
         pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
