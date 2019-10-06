@@ -477,7 +477,7 @@ cfg_prefix! {
 
         #[inline]
         #[cfg(feature = "pool")]
-        fn get_pooled(&self, idx: usize) -> Option<(&P, &T)> {
+        fn get_pooled(&self, idx: usize) -> Option<(&T, &P)> {
             let (addr, page) = self.page_idxs(idx);
             self.pages.get(page)?.get_pooled(addr, idx)
         }
