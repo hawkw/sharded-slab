@@ -10,7 +10,7 @@ pub(crate) struct Slot<T, C> {
     /// into the slot.
     gen: AtomicUsize,
     /// The offset of the next item on the free list.
-    next: AtomicUsize,
+    next: CausalCell<usize>,
     /// The data stored in the slot.
     item: CausalCell<Option<T>>,
     _cfg: PhantomData<fn(C)>,
@@ -55,7 +55,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
         Self {
             gen: AtomicUsize::new(0),
             item: CausalCell::new(None),
-            next: AtomicUsize::new(next),
+            next: CausalCell::new(next),
             _cfg: PhantomData,
         }
     }
@@ -94,7 +94,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
         });
 
         // Advance the slot's generation by one, returning the new generation.
-        let gen = self.gen.fetch_add(1, Ordering::Release) + 1 % Generation::<C>::BITS;
+        let gen = self.gen.load(Ordering::Acquire);
 
         #[cfg(test)]
         println!("-> {:?}", gen);
@@ -104,37 +104,52 @@ impl<T, C: cfg::Config> Slot<T, C> {
 
     #[inline(always)]
     pub(super) fn next(&self) -> usize {
-        self.next.load(Ordering::Acquire)
+        self.next.with(|next| unsafe { *next })
     }
 
     #[inline]
     pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
         let current = self.gen.load(Ordering::Acquire);
-        #[cfg(test)]
-        println!("-> remove={:?}; current={:?}", gen, current);
-
         // Is the index's generation the same as the current generation? If not,
         // the item that index referred to was already removed.
         if gen.value != current {
             return None;
         }
 
+        #[cfg(test)]
+        println!("-> remove={:?}; current={:?}", gen, current);
+        let next_gen = (current + 1) % Generation::<C>::BITS;
+
+        #[cfg(test)]
+        println!("-> new gen {:?}", next_gen);
+
+        if self
+            .gen
+            .compare_and_swap(current, next_gen, Ordering::Release)
+            != current
+        {
+            #[cfg(test)]
+            println!("-> already removed!");
+            return None;
+        }
+
         let val = self.item.with_mut(|item| unsafe { (*item).take() });
-        debug_assert!(val.is_some());
         val
     }
 
     #[inline(always)]
     pub(super) fn set_next(&self, next: usize) {
-        self.next.store(next, Ordering::Release);
+        self.next.with_mut(|n| unsafe {
+            (*n) = next;
+        })
     }
 }
 
-impl<C, T> fmt::Debug for Slot<C, T> {
+impl<T, C: cfg::Config> fmt::Debug for Slot<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slot")
             .field("gen", &self.gen.load(Ordering::Relaxed))
-            .field("next", &self.next.load(Ordering::Relaxed))
+            .field("next", &self.next())
             .finish()
     }
 }
