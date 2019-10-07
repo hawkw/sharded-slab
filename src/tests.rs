@@ -184,16 +184,16 @@ fn remove_remote_and_reuse() {
             assert_eq!(s.remove(idx1), Some(1), "slab: {:#?}", s);
         });
 
+        let idx1 = slab.insert(5).expect("insert");
+        t1.join().expect("thread 1 should not panic");
+
         let s = slab.clone();
         let t2 = thread::spawn(move || {
             assert_eq!(s.remove(idx2), Some(2), "slab: {:#?}", s);
         });
 
-        t1.join().expect("thread 1 should not panic");
-        t2.join().expect("thread 2 should not panic");
-
-        let idx1 = slab.insert(5).expect("insert");
         let idx2 = slab.insert(6).expect("insert");
+        t2.join().expect("thread 2 should not panic");
 
         assert_eq!(slab.get(idx1), Some(&5), "slab: {:#?}", slab);
         assert_eq!(slab.get(idx2), Some(&6), "slab: {:#?}", slab);
