@@ -113,20 +113,25 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.next.load(Ordering::Acquire)
     }
 
-    pub(in crate::page) fn remove(&self, gen: Generation<C>, next: usize) -> Option<T> {
+    #[inline]
+    pub(in crate::page) fn try_remove(&self, gen: Generation<C>, next: usize) -> bool {
         #[cfg(test)]
         println!("-> remove={:?}; current={:?}", gen, self.gen);
 
         // Is the index's generation the same as the current generation? If not,
         // the item that index referred to was already removed.
         if gen != self.gen {
-            return None;
+            return false;
         }
 
+        self.next.store(next, Ordering::Release);
+        true
+    }
+
+    pub(in crate::page) fn remove_value(&self) -> Option<T> {
         let val = self.item.with_mut(|item| unsafe { (*item).take() });
         debug_assert!(val.is_some());
 
-        self.next.store(next, Ordering::Release);
         val
     }
 }
