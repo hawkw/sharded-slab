@@ -161,7 +161,7 @@
 //! See [this page](implementation/index.html) for details on this crate's design
 //! and implementation.
 //!
-#![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.2")]
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.3")]
 
 #[cfg(test)]
 macro_rules! thread_local {
