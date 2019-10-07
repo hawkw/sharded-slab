@@ -135,6 +135,62 @@ fn remove_remote() {
 }
 
 #[test]
+fn racy_remove() {
+    run_model("racy_remove", || {
+        let slab = Arc::new(Slab::new());
+
+        let idx = slab.insert(1).expect("insert");
+        assert_eq!(slab.get(idx), Some(&1));
+
+        let s1 = slab.clone();
+        let s2 = slab.clone();
+
+        let t1 = thread::spawn(move || s1.remove(idx));
+        let t2 = thread::spawn(move || s2.remove(idx));
+
+        let r1 = t1.join().expect("thread 1 should not panic");
+        let r2 = t2.join().expect("thread 2 should not panic");
+
+        assert!(
+            r1.is_none() || r2.is_none(),
+            "both threads should not have removed the value"
+        );
+        assert_eq!(
+            r1.or(r2),
+            Some(1),
+            "one thread should have removed the value"
+        );
+        assert_eq!(slab.get(idx), None);
+    });
+}
+
+#[test]
+fn racy_remove_local() {
+    run_model("racy_remove_local", || {
+        let slab = Arc::new(Slab::new());
+
+        let idx = slab.insert(1).expect("insert");
+        assert_eq!(slab.get(idx), Some(&1));
+
+        let s = slab.clone();
+        let t2 = thread::spawn(move || s.remove(idx));
+        let r1 = slab.remove(idx);
+        let r2 = t2.join().expect("thread 2 should not panic");
+
+        assert!(
+            r1.is_none() || r2.is_none(),
+            "both threads should not have removed the value"
+        );
+        assert_eq!(
+            r1.or(r2),
+            Some(1),
+            "one thread should have removed the value"
+        );
+        assert_eq!(slab.get(idx), None);
+    });
+}
+
+#[test]
 fn concurrent_insert_remove() {
     run_model("concurrent_insert_remove", || {
         let slab = Arc::new(Slab::new());
