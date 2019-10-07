@@ -8,11 +8,12 @@ use std::{fmt, marker::PhantomData};
 pub(crate) struct Slot<T, C> {
     /// ABA guard generation counter incremented every time a value is inserted
     /// into the slot.
-    gen: Generation<C>,
+    gen: AtomicUsize,
     /// The offset of the next item on the free list.
     next: AtomicUsize,
     /// The data stored in the slot.
     item: CausalCell<Option<T>>,
+    _cfg: PhantomData<fn(C)>,
 }
 
 #[repr(transparent)]
@@ -48,36 +49,27 @@ impl<C: cfg::Config> Generation<C> {
             _cfg: PhantomData,
         }
     }
-
-    #[inline(always)]
-    fn advance(&mut self) -> Self {
-        #[cfg(test)]
-        print!("-> advance gen {:?}", self.value);
-        self.value = (self.value + 1) % Self::BITS;
-        #[cfg(test)]
-        println!(" to {:?}", self.value);
-        debug_assert!(self.value <= Self::BITS);
-        *self
-    }
 }
 
 impl<T, C: cfg::Config> Slot<T, C> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
-            gen: Generation::new(0),
+            gen: AtomicUsize::new(0),
             item: CausalCell::new(None),
             next: AtomicUsize::new(next),
+            _cfg: PhantomData,
         }
     }
 
     #[inline(always)]
     pub(in crate::page) fn get(&self, gen: Generation<C>) -> Option<&T> {
+        let current = self.gen.load(Ordering::Acquire);
         #[cfg(test)]
-        println!("-> get {:?}; current={:?}", gen, self.gen);
+        println!("-> get {:?}; current={:?}", gen, current);
 
         // Is the index's generation the same as the current generation? If not,
         // the item that index referred to was removed, so return `None`.
-        if gen != self.gen {
+        if gen.value != current {
             return None;
         }
 
@@ -89,8 +81,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
-    #[inline(always)]
-    pub(in crate::page) fn insert(&mut self, value: &mut Option<T>) -> Generation<C> {
+    #[inline]
+    pub(super) fn insert(&self, value: &mut Option<T>) -> Generation<C> {
         debug_assert!(
             self.item.with(|item| unsafe { (*item).is_none() }),
             "inserted into full slot"
@@ -103,43 +95,46 @@ impl<T, C: cfg::Config> Slot<T, C> {
         });
 
         // Advance the slot's generation by one, returning the new generation.
-        let gen = self.gen.advance();
+        let gen = self.gen.fetch_add(1, Ordering::Release) + 1 % Generation::<C>::BITS;
+
         #[cfg(test)]
         println!("-> {:?}", gen);
-        gen
+
+        Generation::new(gen)
     }
 
-    pub(in crate::page) fn next(&self) -> usize {
+    #[inline(always)]
+    pub(super) fn next(&self) -> usize {
         self.next.load(Ordering::Acquire)
     }
 
     #[inline]
-    pub(in crate::page) fn try_remove(&self, gen: Generation<C>, next: usize) -> bool {
+    pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
+        let current = self.gen.load(Ordering::Acquire);
         #[cfg(test)]
-        println!("-> remove={:?}; current={:?}", gen, self.gen);
+        println!("-> remove={:?}; current={:?}", gen, current);
 
         // Is the index's generation the same as the current generation? If not,
         // the item that index referred to was already removed.
-        if gen != self.gen {
-            return false;
+        if gen.value != current {
+            return None;
         }
 
-        self.next.store(next, Ordering::Release);
-        true
-    }
-
-    pub(in crate::page) fn remove_value(&self) -> Option<T> {
         let val = self.item.with_mut(|item| unsafe { (*item).take() });
         debug_assert!(val.is_some());
-
         val
+    }
+
+    #[inline(always)]
+    pub(super) fn set_next(&self, next: usize) {
+        self.next.store(next, Ordering::Release);
     }
 }
 
 impl<C, T> fmt::Debug for Slot<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Slot")
-            .field("gen", &self.gen)
+            .field("gen", &self.gen.load(Ordering::Relaxed))
             .field("next", &self.next.load(Ordering::Relaxed))
             .finish()
     }
