@@ -128,9 +128,12 @@ impl<T, C: cfg::Config> Page<T, C> {
         #[cfg(test)]
         println!("-> offset {:?}", offset);
 
-        let val = self.slab.get(offset)?.remove(gen, self.local_head);
+        let slot = self.slab.get(offset)?;
+        if !slot.try_remove(gen, self.local_head) {
+            return None;
+        }
         self.local_head = offset;
-        val
+        slot.remove_value()
     }
 
     pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
@@ -138,12 +141,29 @@ impl<T, C: cfg::Config> Page<T, C> {
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
+        let slot = self.slab.get(offset)?;
 
-        let next = self.push_remote(offset);
-        #[cfg(test)]
-        println!("-> next={:?}", next);
+        loop {
+            let next = self.remote_head.load(Ordering::Relaxed);
 
-        self.slab.get(offset)?.remove(gen, next)
+            #[cfg(test)]
+            println!("-> next={:?}", next);
+
+            if !slot.try_remove(gen, next) {
+                break;
+            }
+
+            let actual = self
+                .remote_head
+                .compare_and_swap(next, offset, Ordering::Release);
+            if actual == next {
+                return slot.remove_value();
+            }
+
+            spin_loop_hint();
+        }
+
+        None
     }
 
     pub(crate) fn total_capacity(&self) -> usize {
