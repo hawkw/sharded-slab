@@ -1,5 +1,8 @@
 use crate::cfg::{self, CfgPrivate};
-use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
+use crate::sync::{
+    atomic::{spin_loop_hint, AtomicUsize, Ordering},
+    CausalCell,
+};
 use crate::Pack;
 
 pub(crate) mod slot;
@@ -56,36 +59,78 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
 pub(crate) type Iter<'a, T, C> =
     std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
 
-pub(crate) struct Page<T, C> {
-    prev_sz: usize,
-    remote_head: AtomicUsize,
-    local_head: usize,
-    slab: Box<[Slot<T, C>]>,
+pub(crate) struct Local {
+    head: CausalCell<usize>,
 }
 
-impl<T, C: cfg::Config> Page<T, C> {
-    const NULL: usize = Addr::<C>::NULL;
+pub(crate) struct Shared<T, C> {
+    remote_head: AtomicUsize,
+    size: usize,
+    prev_sz: usize,
+    slab: CausalCell<Option<Box<[Slot<T, C>]>>>,
+}
 
-    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
-        let mut slab = Vec::with_capacity(size);
-        slab.extend((1..size).map(Slot::new));
-        slab.push(Slot::new(Self::NULL));
+impl Local {
+    pub(crate) fn new() -> Self {
         Self {
-            prev_sz,
-            remote_head: AtomicUsize::new(Self::NULL),
-            local_head: 0,
-            slab: slab.into_boxed_slice(),
+            head: CausalCell::new(0),
         }
     }
 
+    #[inline(always)]
+    fn head(&self) -> usize {
+        self.head.with(|head| unsafe { *head })
+    }
+
+    #[inline(always)]
+    fn set_head(&self, new_head: usize) {
+        self.head.with_mut(|head| unsafe {
+            *head = new_head;
+        })
+    }
+}
+
+impl<T, C: cfg::Config> Shared<T, C> {
+    const NULL: usize = Addr::<C>::NULL;
+
+    pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
+        Self {
+            prev_sz,
+            size,
+            remote_head: AtomicUsize::new(Self::NULL),
+            slab: CausalCell::new(None),
+        }
+    }
+
+    #[cold]
+    fn fill(&self) {
+        #[cfg(test)]
+        println!("-> alloc new page ({})", self.size);
+
+        debug_assert!(self.slab.with(|s| unsafe { (*s).is_none() }));
+
+        let mut slab = Vec::with_capacity(self.size);
+        slab.extend((1..self.size).map(Slot::new));
+        slab.push(Slot::new(Self::NULL));
+        self.slab.with_mut(|s| {
+            // this mut access is safe — it only occurs to initially
+            // allocate the page, which only happens on this thread; if the
+            // page has not yet been allocated, other threads will not try
+            // to access it yet.
+            unsafe {
+                *s = Some(slab.into_boxed_slice());
+            }
+        });
+    }
+
     #[inline]
-    pub(crate) fn insert(&mut self, t: &mut Option<T>) -> Option<usize> {
-        let head = self.local_head;
+    pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
+        let head = local.head();
         #[cfg(test)]
         println!("-> local head {:?}", head);
 
         // are there any items on the local free list? (fast path)
-        let head = if head < self.slab.len() {
+        let head = if head < self.size {
             head
         } else {
             // if the local free list is empty, pop all the items on the remote
@@ -104,9 +149,21 @@ impl<T, C: cfg::Config> Page<T, C> {
             return None;
         }
 
-        let slot = &mut self.slab[head];
-        let gen = slot.insert(t);
-        self.local_head = slot.next();
+        // do we need to allocate storage for this page?
+        if self.slab.with(|s| unsafe { (*s).is_none() }) {
+            self.fill();
+        }
+
+        let gen = self.slab.with(|slab| {
+            let slab = unsafe { &*(slab) }
+                .as_ref()
+                .expect("page must have been allocated to insert!");
+            let slot = &slab[head];
+            let gen = slot.insert(t);
+            local.set_head(slot.next());
+            gen
+        });
+
         let index = head + self.prev_sz;
         #[cfg(test)]
         println!("insert at offset: {}", index);
@@ -119,21 +176,33 @@ impl<T, C: cfg::Config> Page<T, C> {
         #[cfg(test)]
         println!("-> offset {:?}", poff);
 
-        self.slab.get(poff)?.get(C::unpack_gen(idx))
+        self.slab.with(|slab| {
+            unsafe { &*slab }
+                .as_ref()?
+                .get(poff)?
+                .get(C::unpack_gen(idx))
+        })
     }
 
-    pub(crate) fn remove_local(&mut self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
+    pub(crate) fn remove_local(
+        &self,
+        local: &Local,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+    ) -> Option<T> {
         let offset = addr.offset() - self.prev_sz;
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
 
-        let slot = self.slab.get(offset)?;
-        if !slot.try_remove(gen, self.local_head) {
-            return None;
-        }
-        self.local_head = offset;
-        slot.remove_value()
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref()?;
+            let slot = slab.get(offset)?;
+            let val = slot.remove_value(gen)?;
+            slot.set_next(local.head());
+            local.set_head(offset);
+            Some(val)
+        })
     }
 
     pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
@@ -141,64 +210,59 @@ impl<T, C: cfg::Config> Page<T, C> {
 
         #[cfg(test)]
         println!("-> offset {:?}", offset);
-        let slot = self.slab.get(offset)?;
 
-        loop {
-            let next = self.remote_head.load(Ordering::Relaxed);
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref()?;
+            let slot = slab.get(offset)?;
+            let val = slot.remove_value(gen)?;
 
-            #[cfg(test)]
-            println!("-> next={:?}", next);
+            while {
+                let next = self.remote_head.load(Ordering::Relaxed);
 
-            if !slot.try_remove(gen, next) {
-                break;
+                #[cfg(test)]
+                println!("-> next={:?}", next);
+
+                slot.set_next(next);
+
+                let actual = self
+                    .remote_head
+                    .compare_and_swap(next, offset, Ordering::Release);
+                actual != next
+            } {
+                spin_loop_hint();
             }
 
-            let actual = self
-                .remote_head
-                .compare_and_swap(next, offset, Ordering::Release);
-            if actual == next {
-                return slot.remove_value();
-            }
-
-            spin_loop_hint();
-        }
-
-        None
+            Some(val)
+        })
     }
 
-    pub(crate) fn total_capacity(&self) -> usize {
-        self.slab.len()
-    }
-
-    pub(crate) fn iter<'a>(&'a self) -> Iter<'a, T, C> {
-        self.slab.iter().filter_map(Slot::value)
-    }
-
-    #[inline(always)]
-    fn push_remote(&self, offset: usize) -> usize {
-        loop {
-            let next = self.remote_head.load(Ordering::Relaxed);
-            let actual = self
-                .remote_head
-                .compare_and_swap(next, offset, Ordering::Release);
-            if actual == next {
-                return next;
-            }
-            spin_loop_hint();
-        }
+    pub(crate) fn iter<'a>(&'a self) -> Option<Iter<'a, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
     }
 }
 
-impl<C, T> fmt::Debug for Page<C, T> {
+impl fmt::Debug for Local {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Page")
+        self.head.with(|head| {
+            let head = unsafe { *head };
+            f.debug_struct("Local")
+                .field("head", &format_args!("{:#0x}", head))
+                .finish()
+        })
+    }
+}
+
+impl<C, T> fmt::Debug for Shared<C, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Shared")
             .field(
                 "remote_head",
                 &format_args!("{:#0x}", &self.remote_head.load(Ordering::Relaxed)),
             )
-            .field("local_head", &format_args!("{:#0x}", &self.local_head))
             .field("prev_sz", &self.prev_sz)
-            .field("slab", &self.slab)
+            .field("size", &self.size)
+            // .field("slab", &self.slab)
             .finish()
     }
 }

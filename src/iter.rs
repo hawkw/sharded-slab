@@ -1,20 +1,16 @@
-use crate::{
-    page::{self, Page},
-    sync::CausalCell,
-    Shard,
-};
+use crate::{page, Shard};
 use std::slice;
 pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
-    pub(super) shards: slice::IterMut<'a, CausalCell<Shard<T, C>>>,
-    pub(super) pages: slice::Iter<'a, Page<T, C>>,
-    pub(super) slots: page::Iter<'a, T, C>,
+    pub(super) shards: slice::IterMut<'a, Shard<T, C>>,
+    pub(super) pages: slice::Iter<'a, page::Shared<T, C>>,
+    pub(super) slots: Option<page::Iter<'a, T, C>>,
 }
 
 impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(item) = self.slots.next() {
+            if let Some(item) = self.slots.as_mut().and_then(|slots| slots.next()) {
                 return Some(item);
             }
 
@@ -23,11 +19,7 @@ impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
             }
 
             if let Some(shard) = self.shards.next() {
-                self.pages = shard.with(|shard| unsafe {
-                    // This is safe, because this iterator has unique mutable access
-                    // to the whole slab.
-                    (*shard).iter()
-                });
+                self.pages = shard.iter();
             } else {
                 return None;
             }
