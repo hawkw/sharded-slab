@@ -236,29 +236,10 @@ fn unique_iter() {
     });
 }
 
-// #[test]
-// fn big() {
-//     let mut model = loom::model::Builder::new();
-//     model.max_branches = 4096;
-//     model.check(|| {
-//         let slab = Slab::new();
-//         for i in 0..4096 {
-//             let k = slab.insert(i).expect("insert");
-//             assert_eq!(slab.get(k).expect("get"), &i);
-//         }
-//     })
-// }
-
 #[test]
 fn custom_page_sz() {
-    struct TinyConfig;
-
-    impl crate::Config for TinyConfig {
-        const INITIAL_PAGE_SIZE: usize = 4;
-    }
-
     let mut model = loom::model::Builder::new();
-    model.max_branches = 20000;
+    model.max_branches = 100000;
     model.check(|| {
         let slab = Slab::new_with_config::<TinyConfig>();
 
