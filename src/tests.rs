@@ -41,9 +41,22 @@ impl crate::Config for TinyConfig {
     const INITIAL_PAGE_SIZE: usize = 4;
 }
 
+fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let iters = AtomicUsize::new(0);
+    loom::model(move || {
+        println!(
+            "\n------------ running test {}; iteration {} ------------\n",
+            name,
+            iters.fetch_add(1, Ordering::SeqCst)
+        );
+        f()
+    });
+}
+
 #[test]
 fn local_remove() {
-    loom::model(|| {
+    run_model("local_remove", || {
         let slab = Arc::new(Slab::new());
 
         let s = slab.clone();
@@ -88,7 +101,7 @@ fn local_remove() {
 
 #[test]
 fn remove_remote() {
-    loom::model(|| {
+    run_model("remove_remote", || {
         let slab = Arc::new(Slab::new());
 
         let idx1 = slab.insert(1).expect("insert");
@@ -123,7 +136,7 @@ fn remove_remote() {
 
 #[test]
 fn concurrent_insert_remove() {
-    loom::model(|| {
+    run_model("concurrent_insert_remove", || {
         let slab = Arc::new(Slab::new());
         let pair = Arc::new((Mutex::new(None), Condvar::new()));
 
@@ -166,7 +179,7 @@ fn concurrent_insert_remove() {
 
 #[test]
 fn remove_remote_and_reuse() {
-    loom::model(|| {
+    run_model("remove_remote_and_reuse", || {
         let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
 
         let idx1 = slab.insert(1).expect("insert");
@@ -204,7 +217,7 @@ fn remove_remote_and_reuse() {
 
 #[test]
 fn unique_iter() {
-    loom::model(|| {
+    run_model("unique_iter", || {
         let mut slab = std::sync::Arc::new(Slab::new());
 
         let s = slab.clone();
