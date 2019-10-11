@@ -39,7 +39,6 @@ impl<C: cfg::Config> Addr<C> {
 
 impl<C: cfg::Config> Pack<C> for Addr<C> {
     const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
-    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = ();
 
