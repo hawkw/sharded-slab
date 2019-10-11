@@ -6,7 +6,7 @@ fn big() {
     for i in 0..10000 {
         println!("{:?}", i);
         let k = slab.insert(i).expect("insert");
-        assert_eq!(slab.get(k).expect("get"), &i);
+        assert_eq!(slab.get(k).expect("get"), i);
     }
 }
 
@@ -22,6 +22,6 @@ fn custom_page_sz() {
     for i in 0..4096 {
         println!("{}", i);
         let k = slab.insert(i).expect("insert");
-        assert_eq!(slab.get(k).expect("get"), &i);
+        assert_eq!(slab.get(k).expect("get"), i);
     }
 }
