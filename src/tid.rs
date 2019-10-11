@@ -45,7 +45,6 @@ thread_local! {
 
 impl<C: cfg::Config> Pack<C> for Tid<C> {
     const LEN: usize = C::MAX_SHARDS.trailing_zeros() as usize + 1;
-    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = page::Addr<C>;
 

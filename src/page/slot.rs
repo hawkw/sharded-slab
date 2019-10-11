@@ -26,7 +26,6 @@ impl<C: cfg::Config> Pack<C> for Generation<C> {
     /// Use all the remaining bits in the word for the generation counter, minus
     /// any bits reserved by the user.
     const LEN: usize = (cfg::WIDTH - C::RESERVED_BITS) - Self::SHIFT;
-    const BITS: usize = cfg::make_mask(Self::LEN);
 
     type Prev = Tid<C>;
 
