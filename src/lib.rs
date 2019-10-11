@@ -16,7 +16,7 @@
 //! let slab = Slab::new();
 //!
 //! let key = slab.insert("hello world").unwrap();
-//! assert_eq!(slab.get(key), Some(&"hello world"));
+//! assert_eq!(slab.get(key).unwrap(), "hello world");
 //! ```
 //!
 //! To share a slab across threads, it may be wrapped in an `Arc`:
@@ -28,18 +28,18 @@
 //! let slab2 = slab.clone();
 //! let thread2 = std::thread::spawn(move || {
 //!     let key = slab2.insert("hello from thread two").unwrap();
-//!     assert_eq!(slab2.get(key), Some(&"hello from thread two"));
+//!     assert_eq!(slab2.get(key).unwrap(), "hello from thread two");
 //!     key
 //! });
 //!
 //! let key1 = slab.insert("hello from thread one").unwrap();
-//! assert_eq!(slab.get(key1), Some(&"hello from thread one"));
+//! assert_eq!(slab.get(key1).unwrap(), "hello from thread one");
 //!
 //! // Wait for thread 2 to complete.
 //! let key2 = thread2.join().unwrap();
 //!
 //! // The item inserted by thread 2 remains in the slab.
-//! assert_eq!(slab.get(key2), Some(&"hello from thread two"));
+//! assert_eq!(slab.get(key2).unwrap(), "hello from thread two");
 //!```
 //!
 //! If items in the slab must be mutated, a `Mutex` or `RwLock` may be used for
@@ -54,13 +54,15 @@
 //!
 //! let slab2 = slab.clone();
 //! let thread2 = std::thread::spawn(move || {
-//!     let mut hello = slab2.get(key).unwrap().lock().unwrap();
+//!     let hello = slab2.get(key).expect("item missing");
+//!     let mut hello = hello.lock().expect("mutex poisoned");
 //!     *hello = String::from("hello everyone!");
 //! });
 //!
 //! thread2.join().unwrap();
 //!
-//! let hello = slab.get(key).unwrap().lock().unwrap();
+//! let hello = slab.get(key).expect("item missing");
+//! let mut hello = hello.lock().expect("mutex poisoned");
 //! assert_eq!(hello.as_str(), "hello everyone!");
 //! ```
 //!
@@ -193,6 +195,17 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
     _cfg: PhantomData<C>,
 }
 
+/// A guard that allows access to an object in a slab.
+///
+/// While the guard exists, it indicates to the slab that the item the guard
+/// references is currently being accessed. If the item is removed from the slab
+/// while a guard exists, the removal will be deferred until all guards are dropped.
+pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
+    inner: page::slot::Guard<'a, T>,
+    shard: &'a Shard<T, C>,
+    key: usize,
+}
+
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
 // ├─────────────┤ ┌───▶│  next──┼─┐
@@ -213,7 +226,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 //                      └────────┘
 //                         ...
 struct Shard<T, C: cfg::Config> {
-    #[cfg(debug_assertions)]
+    /// The shard's parent thread ID.
     tid: usize,
     /// The local free list for each page.
     ///
@@ -274,7 +287,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// let slab = Slab::new();
     ///
     /// let key = slab.insert("hello world").unwrap();
-    /// assert_eq!(slab.get(key), Some(&"hello world"));
+    /// assert_eq!(slab.get(key).unwrap(), "hello world");
     /// ```
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::<C>::current();
@@ -285,12 +298,107 @@ impl<T, C: cfg::Config> Slab<T, C> {
             .map(|idx| tid.pack(idx))
     }
 
+    /// Remove the value associated with the given key from the slab, returning
+    /// `true` if a value was removed.
+    ///
+    /// Unlike [`take`], this method does _not_ block the current thread until
+    /// the value can be removed. Instead, if another thread is currently
+    /// accessing that value, this marks it to be removed by that thread when it
+    /// finishes accessing the value.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let slab = sharded_slab::Slab::new();
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// // Remove the item from the slab.
+    /// assert!(slab.remove(key));
+    ///
+    /// // Now, the slot is empty.
+    /// assert!(!slab.contains(key));
+    /// ```
+    ///
+    /// ```rust
+    /// use std::sync::Arc;
+    ///
+    /// let slab = Arc::new(sharded_slab::Slab::new());
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// let slab2 = slab.clone();
+    /// let thread2 = std::thread::spawn(move || {
+    ///     // Depending on when this thread begins executing, the item may
+    ///     // or may not have already been removed...
+    ///     if let Some(item) = slab2.get(key) {
+    ///         assert_eq!(item, "hello world");
+    ///     }
+    /// });
+    ///
+    /// // The item will be removed by thread2 when it finishes accessing it.
+    /// assert!(slab.remove(key));
+    ///
+    /// thread2.join().unwrap();
+    /// assert!(!slab.contains(key));
+    /// ```
+    /// [`take`]: #method.take
+    pub fn remove(&self, idx: usize) -> bool {
+        let tid = C::unpack_tid(idx);
+        #[cfg(test)]
+        println!("rm_deferred {:?}", tid);
+        self.shards
+            .get(tid.as_usize())
+            .map(|shard| shard.remove(idx))
+            .unwrap_or(false)
+    }
+
     /// Removes the value associated with the given key from the slab, returning
     /// it.
     ///
     /// If the slab does not contain a value for that key, `None` is returned
     /// instead.
-    pub fn remove(&self, idx: usize) -> Option<T> {
+    ///
+    /// **Note**: If the value associated with the given key is currently being
+    /// accessed by another thread, this method will block the current thread
+    /// until the item is no longer accessed. If this is not desired, use
+    /// [`remove`] instead.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let slab = sharded_slab::Slab::new();
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// // Remove the item from the slab, returning it.
+    /// assert_eq!(slab.take(key), Some("hello world"));
+    ///
+    /// // Now, the slot is empty.
+    /// assert!(!slab.contains(key));
+    /// ```
+    ///
+    /// ```rust
+    /// use std::sync::Arc;
+    ///
+    /// let slab = Arc::new(sharded_slab::Slab::new());
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// let slab2 = slab.clone();
+    /// let thread2 = std::thread::spawn(move || {
+    ///     // Depending on when this thread begins executing, the item may
+    ///     // or may not have already been removed...
+    ///     if let Some(item) = slab2.get(key) {
+    ///         assert_eq!(item, "hello world");
+    ///     }
+    /// });
+    ///
+    /// // The item will only be removed when the other thread finishes
+    /// // accessing it.
+    /// assert_eq!(slab.take(key), Some("hello world"));
+    ///
+    /// thread2.join().unwrap();
+    /// assert!(!slab.contains(key));
+    /// ```
+    /// [`remove`]: #method.remove
+    pub fn take(&self, idx: usize) -> Option<T> {
         let tid = C::unpack_tid(idx);
         #[cfg(test)]
         println!("rm {:?}", tid);
@@ -313,13 +421,13 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// let slab = sharded_slab::Slab::new();
     /// let key = slab.insert("hello world").unwrap();
     ///
-    /// assert_eq!(slab.get(key), Some(&"hello world"));
-    /// assert_eq!(slab.get(12345), None);
+    /// assert_eq!(slab.get(key).unwrap(), "hello world");
+    /// assert!(slab.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<&T> {
+    pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
         let tid = C::unpack_tid(key);
         #[cfg(test)]
-        println!("get {:?}", tid);
+        println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         self.shards.get(tid.as_usize())?.get(key)
     }
 
@@ -333,7 +441,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// let key = slab.insert("hello world").unwrap();
     /// assert!(slab.contains(key));
     ///
-    /// slab.remove(key).unwrap();
+    /// slab.take(key).unwrap();
     /// assert!(!slab.contains(key));
     /// ```
     pub fn contains(&self, key: usize) -> bool {
@@ -355,7 +463,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
 }
 
 impl<T, C: cfg::Config> Shard<T, C> {
-    fn new(_idx: usize) -> Self {
+    fn new(tid: usize) -> Self {
         let mut total_sz = 0;
         let shared = (0..C::MAX_PAGES)
             .map(|page_num| {
@@ -366,12 +474,13 @@ impl<T, C: cfg::Config> Shard<T, C> {
             })
             .collect();
         let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
-        Self {
-            #[cfg(debug_assertions)]
-            tid: _idx,
-            local,
-            shared,
-        }
+        Self { tid, local, shared }
+    }
+
+    #[inline(always)]
+    fn page_indices(idx: usize) -> (page::Addr<C>, usize) {
+        let addr = C::unpack_addr(idx);
+        (addr, addr.index())
     }
 
     fn insert(&self, value: T) -> Option<usize> {
@@ -392,51 +501,60 @@ impl<T, C: cfg::Config> Shard<T, C> {
     }
 
     #[inline(always)]
-    fn get(&self, idx: usize) -> Option<&T> {
-        #[cfg(debug_assertions)]
+    fn get(&self, idx: usize) -> Option<Guard<'_, T, C>> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let addr = C::unpack_addr(idx);
-        let i = addr.index();
+        let (addr, page_index) = Self::page_indices(idx);
+
         #[cfg(test)]
-        println!("-> {:?}; idx {:?}", addr, i);
-        if i > self.shared.len() {
+        println!("-> {:?}", addr);
+        if page_index > self.shared.len() {
             return None;
         }
-        self.shared[i].get(addr, idx)
+
+        let inner = self.shared[page_index].get(addr, idx)?;
+        Some(Guard {
+            inner,
+            shard: self,
+            key: idx,
+        })
+    }
+
+    fn remove(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = Self::page_indices(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        self.shared[page_index].remove(addr, C::unpack_gen(idx))
     }
 
     /// Remove an item on the shard's local thread.
     fn remove_local(&self, idx: usize) -> Option<T> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        }
-        let addr = C::unpack_addr(idx);
-        let page = addr.index();
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = Self::page_indices(idx);
 
         #[cfg(test)]
-        println!("-> remove_local {:?}; page {:?}", addr, page);
+        println!("-> remove_local {:?}", addr);
 
         self.shared
-            .get(page)?
-            .remove_local(self.local(page), addr, C::unpack_gen(idx))
+            .get(page_index)?
+            .remove_local(self.local(page_index), addr, C::unpack_gen(idx))
     }
 
     /// Remove an item, while on a different thread from the shard's local thread.
     fn remove_remote(&self, idx: usize) -> Option<T> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-            debug_assert!(Tid::<C>::current().as_usize() != self.tid);
-        }
-        let addr = C::unpack_addr(idx);
-        let page = addr.index();
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert!(Tid::<C>::current().as_usize() != self.tid);
+
+        let (addr, page_index) = Self::page_indices(idx);
 
         #[cfg(test)]
-        println!("-> remove_remote {:?}; page {:?}", addr, page);
+        println!("-> remove_remote {:?}; page {:?}", addr, page_index);
 
         self.shared
-            .get(page)?
+            .get(page_index)?
             .remove_remote(addr, C::unpack_gen(idx))
     }
 
@@ -478,6 +596,52 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
         d.field("shared", &self.shared).finish()
     }
 }
+
+// === impl Guard ===
+
+impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.item()
+    }
+}
+
+impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
+    fn drop(&mut self) {
+        use crate::sync::atomic;
+        if self.inner.release() {
+            atomic::fence(atomic::Ordering::Acquire);
+            if Tid::<C>::current().as_usize() == self.shard.tid {
+                self.shard.remove_local(self.key);
+            } else {
+                self.shard.remove_remote(self.key);
+            }
+        }
+    }
+}
+
+impl<'a, T, C> fmt::Debug for Guard<'a, T, C>
+where
+    T: fmt::Debug,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner.item(), f)
+    }
+}
+
+impl<'a, T, C> PartialEq<T> for Guard<'a, T, C>
+where
+    T: PartialEq<T>,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.inner.item().eq(other)
+    }
+}
+
+// === pack ===
 
 pub(crate) trait Pack<C: cfg::Config>: Sized {
     // ====== provided by each implementation =================================

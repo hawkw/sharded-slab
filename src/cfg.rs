@@ -115,11 +115,6 @@ pub(crate) struct DebugConfig<C: Config> {
 
 pub(crate) const WIDTH: usize = std::mem::size_of::<usize>() * 8;
 
-pub(crate) const fn make_mask(bits: usize) -> usize {
-    let shift = 1 << (bits - 1);
-    shift | (shift - 1)
-}
-
 pub(crate) const fn next_pow2(n: usize) -> usize {
     let pow2 = n.count_ones() == 1;
     let zeros = n.leading_zeros();
