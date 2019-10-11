@@ -60,28 +60,28 @@ fn insert_remove_local(c: &mut Criterion) {
                             start.wait();
                             let v: Vec<_> = (0..i).map(|i| slab.insert(i).unwrap()).collect();
                             for i in v {
-                                slab.remove(i);
+                                slab.take(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
                             let v: Vec<_> = (0..i).map(|i| slab.insert(i).unwrap()).collect();
                             for i in v {
-                                slab.remove(i);
+                                slab.take(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
                             let v: Vec<_> = (0..i).map(|i| slab.insert(i).unwrap()).collect();
                             for i in v {
-                                slab.remove(i);
+                                slab.take(i);
                             }
                         })
                         .thread(move |start, slab| {
                             start.wait();
                             let v: Vec<_> = (0..i).map(|i| slab.insert(i).unwrap()).collect();
                             for i in v {
-                                slab.remove(i);
+                                slab.take(i);
                             }
                         })
                         .run();
@@ -102,7 +102,7 @@ fn insert_remove_local(c: &mut Criterion) {
                             let v: Vec<_> =
                                 (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
-                                slab.write().unwrap().remove(i);
+                                slab.write().unwrap().take(i);
                             }
                         })
                         .thread(move |start, slab| {
@@ -110,7 +110,7 @@ fn insert_remove_local(c: &mut Criterion) {
                             let v: Vec<_> =
                                 (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
-                                slab.write().unwrap().remove(i);
+                                slab.write().unwrap().take(i);
                             }
                         })
                         .thread(move |start, slab| {
@@ -118,7 +118,7 @@ fn insert_remove_local(c: &mut Criterion) {
                             let v: Vec<_> =
                                 (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
-                                slab.write().unwrap().remove(i);
+                                slab.write().unwrap().take(i);
                             }
                         })
                         .thread(move |start, slab| {
@@ -126,7 +126,7 @@ fn insert_remove_local(c: &mut Criterion) {
                             let v: Vec<_> =
                                 (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                             for i in v {
-                                slab.write().unwrap().remove(i);
+                                slab.write().unwrap().take(i);
                             }
                         })
                         .run();
@@ -151,7 +151,7 @@ fn insert_remove_single_thread(c: &mut Criterion) {
             b.iter(|| {
                 let v: Vec<_> = (0..i).map(|i| slab.insert(i).unwrap()).collect();
                 for i in v {
-                    slab.remove(i);
+                    slab.take(i);
                 }
             });
         });
@@ -160,7 +160,7 @@ fn insert_remove_single_thread(c: &mut Criterion) {
             b.iter(|| {
                 let v: Vec<_> = (0..i).map(|i| slab.insert(i)).collect();
                 for i in v {
-                    slab.remove(i);
+                    slab.take(i);
                 }
             });
         });
@@ -169,7 +169,7 @@ fn insert_remove_single_thread(c: &mut Criterion) {
             b.iter(|| {
                 let v: Vec<_> = (0..i).map(|i| slab.write().unwrap().insert(i)).collect();
                 for i in v {
-                    slab.write().unwrap().remove(i);
+                    slab.write().unwrap().take(i);
                 }
             });
         });

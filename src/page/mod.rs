@@ -170,7 +170,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
     }
 
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<&T> {
+    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T>> {
         let poff = addr.offset() - self.prev_sz;
         #[cfg(test)]
         println!("-> offset {:?}", poff);
@@ -180,6 +180,21 @@ impl<T, C: cfg::Config> Shared<T, C> {
                 .as_ref()?
                 .get(poff)?
                 .get(C::unpack_gen(idx))
+        })
+    }
+
+    pub(crate) fn remove(&self, addr: Addr<C>, gen: slot::Generation<C>) -> bool {
+        let offset = addr.offset() - self.prev_sz;
+        #[cfg(test)]
+        println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.remove(gen)
+            } else {
+                false
+            }
         })
     }
 

@@ -2,6 +2,8 @@ use crate::Slab;
 use loom::sync::{Arc, Condvar, Mutex};
 use loom::thread;
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
 mod idx {
     use crate::{
         cfg,
@@ -42,7 +44,6 @@ impl crate::Config for TinyConfig {
 }
 
 fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     let iters = AtomicUsize::new(0);
     loom::model(move || {
         println!(
@@ -55,44 +56,44 @@ fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
 }
 
 #[test]
-fn local_remove() {
-    run_model("local_remove", || {
+fn take_local() {
+    run_model("take_local", || {
         let slab = Arc::new(Slab::new());
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
             let idx = s.insert(1).expect("insert");
-            assert_eq!(s.get(idx), Some(&1));
-            assert_eq!(s.remove(idx), Some(1));
-            assert_eq!(s.get(idx), None);
+            assert_eq!(s.get(idx).unwrap(), 1);
+            assert_eq!(s.take(idx), Some(1));
+            assert!(s.get(idx).is_none());
             let idx = s.insert(2).expect("insert");
-            assert_eq!(s.get(idx), Some(&2));
-            assert_eq!(s.remove(idx), Some(2));
-            assert_eq!(s.get(idx), None);
+            assert_eq!(s.get(idx).unwrap(), 2);
+            assert_eq!(s.take(idx), Some(2));
+            assert!(s.get(idx).is_none());
         });
 
         let s = slab.clone();
         let t2 = thread::spawn(move || {
             let idx = s.insert(3).expect("insert");
-            assert_eq!(s.get(idx), Some(&3));
-            assert_eq!(s.remove(idx), Some(3));
-            assert_eq!(s.get(idx), None);
+            assert_eq!(s.get(idx).unwrap(), 3);
+            assert_eq!(s.take(idx), Some(3));
+            assert!(s.get(idx).is_none());
             let idx = s.insert(4).expect("insert");
-            assert_eq!(s.get(idx), Some(&4));
-            assert_eq!(s.remove(idx), Some(4));
-            assert_eq!(s.get(idx), None);
+            assert_eq!(s.get(idx).unwrap(), 4);
+            assert_eq!(s.take(idx), Some(4));
+            assert!(s.get(idx).is_none());
         });
 
         let s = slab;
         let idx1 = s.insert(5).expect("insert");
-        assert_eq!(s.get(idx1), Some(&5));
+        assert_eq!(s.get(idx1).unwrap(), 5);
         let idx2 = s.insert(6).expect("insert");
-        assert_eq!(s.get(idx2), Some(&6));
-        assert_eq!(s.remove(idx1), Some(5));
-        assert_eq!(s.get(idx1), None);
-        assert_eq!(s.get(idx2), Some(&6));
-        assert_eq!(s.remove(idx2), Some(6));
-        assert_eq!(s.get(idx2), None);
+        assert_eq!(s.get(idx2).unwrap(), 6);
+        assert_eq!(s.take(idx1), Some(5));
+        assert!(s.get(idx1).is_none());
+        assert_eq!(s.get(idx2).unwrap(), 6);
+        assert_eq!(s.take(idx2), Some(6));
+        assert!(s.get(idx2).is_none());
 
         t1.join().expect("thread 1 should not panic");
         t2.join().expect("thread 2 should not panic");
@@ -100,53 +101,52 @@ fn local_remove() {
 }
 
 #[test]
-fn remove_remote() {
-    run_model("remove_remote", || {
+fn take_remote() {
+    run_model("take_remote", || {
         let slab = Arc::new(Slab::new());
 
         let idx1 = slab.insert(1).expect("insert");
-        assert_eq!(slab.get(idx1), Some(&1));
-
+        assert_eq!(slab.get(idx1).unwrap(), 1);
         let idx2 = slab.insert(2).expect("insert");
-        assert_eq!(slab.get(idx2), Some(&2));
+        assert_eq!(slab.get(idx2).unwrap(), 2);
 
         let idx3 = slab.insert(3).expect("insert");
-        assert_eq!(slab.get(idx3), Some(&3));
+        assert_eq!(slab.get(idx3).unwrap(), 3);
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
-            assert_eq!(s.get(idx2), Some(&2));
-            assert_eq!(s.remove(idx2), Some(2));
+            assert_eq!(s.get(idx2).unwrap(), 2);
+            assert_eq!(s.take(idx2), Some(2));
         });
 
         let s = slab.clone();
         let t2 = thread::spawn(move || {
-            assert_eq!(s.get(idx3), Some(&3));
-            assert_eq!(s.remove(idx3), Some(3));
+            assert_eq!(s.get(idx3).unwrap(), 3);
+            assert_eq!(s.take(idx3), Some(3));
         });
 
         t1.join().expect("thread 1 should not panic");
         t2.join().expect("thread 2 should not panic");
 
-        assert_eq!(slab.get(idx1), Some(&1));
-        assert_eq!(slab.get(idx2), None);
-        assert_eq!(slab.get(idx3), None);
+        assert_eq!(slab.get(idx1).unwrap(), 1);
+        assert!(slab.get(idx2).is_none());
+        assert!(slab.get(idx3).is_none());
     });
 }
 
 #[test]
-fn racy_remove() {
-    run_model("racy_remove", || {
+fn racy_take() {
+    run_model("racy_take", || {
         let slab = Arc::new(Slab::new());
 
         let idx = slab.insert(1).expect("insert");
-        assert_eq!(slab.get(idx), Some(&1));
+        assert_eq!(slab.get(idx).unwrap(), 1);
 
         let s1 = slab.clone();
         let s2 = slab.clone();
 
-        let t1 = thread::spawn(move || s1.remove(idx));
-        let t2 = thread::spawn(move || s2.remove(idx));
+        let t1 = thread::spawn(move || s1.take(idx));
+        let t2 = thread::spawn(move || s2.take(idx));
 
         let r1 = t1.join().expect("thread 1 should not panic");
         let r2 = t2.join().expect("thread 2 should not panic");
@@ -160,38 +160,37 @@ fn racy_remove() {
             Some(1),
             "one thread should have removed the value"
         );
-        assert_eq!(slab.get(idx), None);
+        assert!(slab.get(idx).is_none());
     });
 }
 
 #[test]
-fn racy_remove_local() {
-    run_model("racy_remove_local", || {
+fn racy_take_local() {
+    run_model("racy_take_local", || {
         let slab = Arc::new(Slab::new());
 
         let idx = slab.insert(1).expect("insert");
-        assert_eq!(slab.get(idx), Some(&1));
+        assert_eq!(slab.get(idx).unwrap(), 1);
 
         let s = slab.clone();
-        let t2 = thread::spawn(move || s.remove(idx));
-        let r1 = slab.remove(idx);
+        let t2 = thread::spawn(move || s.take(idx));
+        let r1 = slab.take(idx);
         let r2 = t2.join().expect("thread 2 should not panic");
 
         assert!(
             r1.is_none() || r2.is_none(),
             "both threads should not have removed the value"
         );
-        assert_eq!(
-            r1.or(r2),
-            Some(1),
+        assert!(
+            r1.or(r2).is_some(),
             "one thread should have removed the value"
         );
-        assert_eq!(slab.get(idx), None);
+        assert!(slab.get(idx).is_none());
     });
 }
 
 #[test]
-fn concurrent_insert_remove() {
+fn concurrent_insert_take() {
     run_model("concurrent_insert_remove", || {
         let slab = Arc::new(Slab::new());
         let pair = Arc::new((Mutex::new(None), Condvar::new()));
@@ -207,7 +206,7 @@ fn concurrent_insert_remove() {
                     next = cvar.wait(next).unwrap();
                 }
                 let key = next.take().unwrap();
-                assert_eq!(slab2.remove(key), Some(i));
+                assert_eq!(slab2.take(key), Some(i));
                 cvar.notify_one();
             }
         });
@@ -234,8 +233,8 @@ fn concurrent_insert_remove() {
 }
 
 #[test]
-fn remove_remote_and_reuse() {
-    run_model("remove_remote_and_reuse", || {
+fn take_remote_and_reuse() {
+    run_model("take_remote_and_reuse", || {
         let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
 
         let idx1 = slab.insert(1).expect("insert");
@@ -243,23 +242,133 @@ fn remove_remote_and_reuse() {
         let idx3 = slab.insert(3).expect("insert");
         let idx4 = slab.insert(4).expect("insert");
 
-        assert_eq!(slab.get(idx1), Some(&1), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx2), Some(&2), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx3), Some(&3), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx4), Some(&4), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx1).unwrap(), 1, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx2).unwrap(), 2, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx3).unwrap(), 3, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx4).unwrap(), 4, "slab: {:#?}", slab);
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
-            assert_eq!(s.remove(idx1), Some(1), "slab: {:#?}", s);
+            assert_eq!(s.take(idx1), Some(1), "slab: {:#?}", s);
         });
 
         let idx1 = slab.insert(5).expect("insert");
         t1.join().expect("thread 1 should not panic");
 
-        assert_eq!(slab.get(idx1), Some(&5), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx2), Some(&2), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx3), Some(&3), "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx4), Some(&4), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx1).unwrap(), 5, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx2).unwrap(), 2, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx3).unwrap(), 3, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx4).unwrap(), 4, "slab: {:#?}", slab);
+    });
+}
+
+struct SetDropped {
+    value: usize,
+    dropped: std::sync::Arc<AtomicBool>,
+}
+
+struct AssertDropped {
+    dropped: std::sync::Arc<AtomicBool>,
+}
+
+impl AssertDropped {
+    fn new(value: usize) -> (Self, SetDropped) {
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        let val = SetDropped {
+            value,
+            dropped: dropped.clone(),
+        };
+        (Self { dropped }, val)
+    }
+
+    fn assert_dropped(&self) {
+        assert!(
+            self.dropped.load(Ordering::SeqCst),
+            "value should have been dropped!"
+        );
+    }
+}
+
+impl Drop for SetDropped {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn remove_local() {
+    run_model("remove_local", || {
+        let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
+        let slab2 = slab.clone();
+
+        let (dropped, item) = AssertDropped::new(1);
+        let idx = slab.insert(item).expect("insert");
+
+        let guard = slab.get(idx).unwrap();
+
+        assert!(slab.remove(idx));
+
+        let t1 = thread::spawn(move || {
+            let g = slab2.get(idx);
+            drop(g);
+        });
+
+        assert!(slab.get(idx).is_none());
+
+        t1.join().expect("thread 1 should not panic");
+
+        drop(guard);
+        assert!(slab.get(idx).is_none());
+        dropped.assert_dropped();
+    })
+}
+
+#[test]
+fn remove_remote() {
+    run_model("remove_remote", || {
+        let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
+        let slab2 = slab.clone();
+
+        let (dropped, item) = AssertDropped::new(1);
+        let idx = slab.insert(item).expect("insert");
+
+        assert!(slab.remove(idx));
+        let t1 = thread::spawn(move || {
+            let g = slab2.get(idx);
+            drop(g);
+        });
+
+        t1.join().expect("thread 1 should not panic");
+
+        assert!(slab.get(idx).is_none());
+        dropped.assert_dropped();
+    });
+}
+
+#[test]
+fn remove_remote_during_insert() {
+    run_model("remove_remote_during_insert", || {
+        let slab = Arc::new(Slab::new_with_config::<TinyConfig>());
+        let slab2 = slab.clone();
+
+        let (dropped, item) = AssertDropped::new(1);
+        let idx = slab.insert(item).expect("insert");
+
+        let t1 = thread::spawn(move || {
+            let g = slab2.get(idx);
+            assert_ne!(g.as_ref().map(|v| v.value), Some(2));
+            drop(g);
+        });
+
+        let (_, item) = AssertDropped::new(2);
+        assert!(slab.remove(idx));
+        let idx2 = slab.insert(item).expect("insert");
+
+        t1.join().expect("thread 1 should not panic");
+
+        assert!(slab.get(idx).is_none());
+        assert!(slab.get(idx2).is_some());
+        dropped.assert_dropped();
     });
 }
 
@@ -297,12 +406,13 @@ fn custom_page_sz() {
     let mut model = loom::model::Builder::new();
     model.max_branches = 100000;
     model.check(|| {
-        let slab = Slab::new_with_config::<TinyConfig>();
+        let slab = Slab::<usize>::new_with_config::<TinyConfig>();
 
-        for i in 0..1024 {
+        for i in 0..1024usize {
             println!("{}", i);
             let k = slab.insert(i).expect("insert");
-            assert_eq!(slab.get(k).expect("get"), &i, "slab: {:#?}", slab);
+            let v = slab.get(k).expect("get");
+            assert_eq!(v, i, "slab: {:#?}", slab);
         }
     });
 }
