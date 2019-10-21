@@ -35,7 +35,7 @@ optimization, and there may still be some lurking bugs.
 First, add this to your `Cargo.toml`:
 
 ```toml
-sharded-slab = "0.0.2"
+sharded-slab = "0.0.4"
 ```
 
 ### Examples
@@ -44,11 +44,10 @@ Inserting an item into the slab, returning an index:
 
 ```rust
 use sharded_slab::Slab;
-
 let slab = Slab::new();
 
 let key = slab.insert("hello world").unwrap();
-assert_eq!(slab.get(key), Some(&"hello world"));
+assert_eq!(slab.get(key).unwrap(), "hello world");
 ```
 
 To share a slab across threads, it may be wrapped in an `Arc`:
@@ -56,24 +55,23 @@ To share a slab across threads, it may be wrapped in an `Arc`:
 ```rust
 use sharded_slab::Slab;
 use std::sync::Arc;
-
 let slab = Arc::new(Slab::new());
 
 let slab2 = slab.clone();
 let thread2 = std::thread::spawn(move || {
     let key = slab2.insert("hello from thread two").unwrap();
-    assert_eq!(slab2.get(key), Some(&"hello from thread two"));
+    assert_eq!(slab2.get(key).unwrap(), "hello from thread two");
     key
 });
 
 let key1 = slab.insert("hello from thread one").unwrap();
-assert_eq!(slab.get(key1), Some(&"hello from thread one"));
+assert_eq!(slab.get(key1).unwrap(), "hello from thread one");
 
 // Wait for thread 2 to complete.
 let key2 = thread2.join().unwrap();
 
 // The item inserted by thread 2 remains in the slab.
-assert_eq!(slab.get(key2), Some(&"hello from thread two"));
+assert_eq!(slab.get(key2).unwrap(), "hello from thread two");
 ```
 
 If items in the slab must be mutated, a `Mutex` or `RwLock` may be used for
@@ -82,17 +80,21 @@ each item, providing granular locking of items rather than of the slab:
 ```rust
 use sharded_slab::Slab;
 use std::sync::{Arc, Mutex};
-
 let slab = Arc::new(Slab::new());
+
 let key = slab.insert(Mutex::new(String::from("hello world"))).unwrap();
 
 let slab2 = slab.clone();
-std::thread::spawn(move || {
-    let mut hello = slab2.get(key).unwrap().lock().unwrap();
+let thread2 = std::thread::spawn(move || {
+    let hello = slab2.get(key).expect("item missing");
+    let mut hello = hello.lock().expect("mutex poisoned");
     *hello = String::from("hello everyone!");
-}).join().unwrap();
+});
 
-let hello = slab.get(key).unwrap().lock().unwrap();
+thread2.join().unwrap();
+
+let hello = slab.get(key).expect("item missing");
+let mut hello = hello.lock().expect("mutex poisoned");
 assert_eq!(hello.as_str(), "hello everyone!");
 ```
 
