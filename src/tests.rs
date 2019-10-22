@@ -304,6 +304,7 @@ fn concurrent_remove_remote_and_reuse() {
 
         let s = slab.clone();
         let s2 = slab.clone();
+
         let t1 = thread::spawn(move || {
             s.take(idx1).expect("must remove");
         });
@@ -313,14 +314,12 @@ fn concurrent_remove_remote_and_reuse() {
         });
 
         let idx3 = store_when_free(&slab, 3);
-        let idx4 = store_when_free(&slab, 4);
         t1.join().expect("thread 1 should not panic");
         t2.join().expect("thread 1 should not panic");
 
         assert!(slab.get(idx1).is_none(), "slab: {:#?}", slab);
         assert!(slab.get(idx2).is_none(), "slab: {:#?}", slab);
         assert_eq!(slab.get(idx3).unwrap(), 3, "slab: {:#?}", slab);
-        assert_eq!(slab.get(idx4).unwrap(), 4, "slab: {:#?}", slab);
     });
 }
 
