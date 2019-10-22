@@ -64,7 +64,7 @@ pub(crate) struct Local {
 }
 
 pub(crate) struct Shared<T, C> {
-    remote_head: AtomicUsize,
+    remote: stack::TransferStack<C>,
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Box<[Slot<T, C>]>>>,
@@ -97,7 +97,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
         Self {
             prev_sz,
             size,
-            remote_head: AtomicUsize::new(Self::NULL),
+            remote: stack::TransferStack::new(),
             slab: CausalCell::new(None),
         }
     }
@@ -134,10 +134,10 @@ impl<T, C: cfg::Config> Shared<T, C> {
         } else {
             // if the local free list is empty, pop all the items on the remote
             // free list onto the local free list.
-            let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
+            let head = self.remote.pop_all();
 
             test_println!("-> remote head {:?}", head);
-            head
+            head?
         };
 
         // if the head is still null, both the local and remote free lists are
@@ -226,29 +226,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
             let slab = unsafe { &*slab }.as_ref()?;
             let slot = slab.get(offset)?;
             let val = slot.remove_value(gen)?;
-
-            let mut next = self.remote_head.load(Ordering::Relaxed);
-            loop {
-                slot.set_next(next);
-                test_println!("-> next {:#x}", next);
-
-                match self.remote_head.compare_exchange(
-                    next,
-                    offset,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    // lost the race!
-                    Err(actual) => {
-                        test_println!("-> retry!");
-                        next = actual;
-                    }
-                    Ok(_) => {
-                        test_println!("-> successful; next={:#x}", next);
-                        return Some(val);
-                    }
-                }
-            }
+            self.remote.push(offset, |next| slot.set_next(next));
+            Some(val)
         })
     }
 
@@ -272,10 +251,7 @@ impl fmt::Debug for Local {
 impl<C, T> fmt::Debug for Shared<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Shared")
-            .field(
-                "remote_head",
-                &format_args!("{:#0x}", &self.remote_head.load(Ordering::Relaxed)),
-            )
+            .field("remote", &self.remote)
             .field("prev_sz", &self.prev_sz)
             .field("size", &self.size)
             // .field("slab", &self.slab)
