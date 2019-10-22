@@ -212,14 +212,12 @@ impl<T, C: cfg::Config> Slot<T, C> {
         loop {
             let refs = self.refs.load(Ordering::Acquire);
 
-            print!("-> refs={:?}", refs);
-
             if refs & Lifecycle::REFS_MASK == 0 {
-                test_println!("; ok to remove!");
+                test_println!("-> refs={:#x}; ok to remove!", refs);
                 return self.item.with_mut(|item| unsafe { (*item).take() });
             }
 
-            test_println!("; spin");
+            test_println!("-> refs={:#x}; spin...", refs);
             atomic::spin_loop_hint();
         }
     }
