@@ -103,8 +103,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
 
     #[cold]
     fn fill(&self) {
-        #[cfg(test)]
-        println!("-> alloc new page ({})", self.size);
+        test_println!("-> alloc new page ({})", self.size);
 
         debug_assert!(self.slab.with(|s| unsafe { (*s).is_none() }));
 
@@ -125,8 +124,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
     #[inline]
     pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
         let head = local.head();
-        #[cfg(test)]
-        println!("-> local head {:?}", head);
+
+        test_println!("-> local head {:?}", head);
 
         // are there any items on the local free list? (fast path)
         let head = if head < self.size {
@@ -135,16 +134,15 @@ impl<T, C: cfg::Config> Shared<T, C> {
             // if the local free list is empty, pop all the items on the remote
             // free list onto the local free list.
             let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
-            #[cfg(test)]
-            println!("-> remote head {:?}", head);
+
+            test_println!("-> remote head {:?}", head);
             head
         };
 
         // if the head is still null, both the local and remote free lists are
         // empty --- we can't fit any more items on this page.
         if head == Self::NULL {
-            #[cfg(test)]
-            println!("-> NULL! {:?}", head);
+            test_println!("-> NULL! {:?}", head);
             return None;
         }
 
@@ -164,16 +162,16 @@ impl<T, C: cfg::Config> Shared<T, C> {
         });
 
         let index = head + self.prev_sz;
-        #[cfg(test)]
-        println!("insert at offset: {}", index);
+
+        test_println!("insert at offset: {}", index);
         Some(gen.pack(index))
     }
 
     #[inline]
     pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T>> {
         let poff = addr.offset() - self.prev_sz;
-        #[cfg(test)]
-        println!("-> offset {:?}", poff);
+
+        test_println!("-> offset {:?}", poff);
 
         self.slab.with(|slab| {
             unsafe { &*slab }
@@ -185,8 +183,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
 
     pub(crate) fn remove(&self, addr: Addr<C>, gen: slot::Generation<C>) -> bool {
         let offset = addr.offset() - self.prev_sz;
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
@@ -206,8 +204,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
     ) -> Option<T> {
         let offset = addr.offset() - self.prev_sz;
 
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
@@ -222,8 +219,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
     pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
         let offset = addr.offset() - self.prev_sz;
 
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
@@ -233,8 +229,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
             while {
                 let next = self.remote_head.load(Ordering::Relaxed);
 
-                #[cfg(test)]
-                println!("-> next={:?}", next);
+                test_println!("-> next={:?}", next);
 
                 slot.set_next(next);
 
@@ -319,7 +314,6 @@ impl<C: cfg::Config> Clone for Addr<C> {
 
 impl<C: cfg::Config> Copy for Addr<C> {}
 
-#[cfg(test)]
 mod test {
     use super::*;
     use crate::Pack;

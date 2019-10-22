@@ -83,8 +83,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
             let state = Lifecycle::from(lifecycle);
 
             let current_gen = self.gen.load(Ordering::Acquire);
-            #[cfg(test)]
-            println!(
+
+            test_println!(
                 "-> get {:?}; current_gen={:?}; lifecycle={:#x}; state={:?}; refs={:?};",
                 gen,
                 current_gen,
@@ -108,8 +108,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
             ) {
                 Ok(_) => {
                     let item = self.value()?;
-                    #[cfg(test)]
-                    println!("-> {:?} + 1 refs", lifecycle >> Lifecycle::REFS_SHIFT,);
+
+                    test_println!("-> {:?} + 1 refs", lifecycle >> Lifecycle::REFS_SHIFT,);
 
                     return Some(Guard {
                         item,
@@ -117,8 +117,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
                     });
                 }
                 Err(actual) => {
-                    #[cfg(test)]
-                    println!("-> retry; lifecycle={:#x};", actual);
+                    test_println!("-> retry; lifecycle={:#x};", actual);
                     lifecycle = actual;
                 }
             };
@@ -150,8 +149,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
 
         let gen = self.gen.load(Ordering::Acquire);
 
-        #[cfg(test)]
-        println!("-> {:?}", gen);
+        test_println!("-> {:?}", gen);
 
         Generation::new(gen)
     }
@@ -165,8 +163,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
     pub(super) fn remove(&self, gen: Generation<C>) -> bool {
         let curr_gen = self.gen.load(Ordering::Acquire);
 
-        #[cfg(test)]
-        println!("-> remove deferred; gen={:?};", curr_gen);
+        test_println!("-> remove deferred; gen={:?};", curr_gen);
 
         // Is the slot still at the generation we are trying to remove?
         if gen.value != curr_gen {
@@ -176,8 +173,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
         let prev = self
             .refs
             .fetch_or(Lifecycle::Marked as usize, Ordering::Release);
-        #[cfg(test)]
-        println!("-> remove deferred; marked, prev={:#2x};", prev);
+
+        test_println!("-> remove deferred; marked, prev={:#2x};", prev);
 
         // Are there currently outstanding references to the slot? If so, it
         // will have to be removed when those references are dropped.
@@ -189,8 +186,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
         atomic::fence(Ordering::Acquire);
 
         // Otherwise, we can remove the slot now!
-        #[cfg(test)]
-        println!("-> remove deferred; can remove now");
+
+        test_println!("-> remove deferred; can remove now");
         self.remove_inner(curr_gen).is_some()
     }
 
@@ -202,31 +199,27 @@ impl<T, C: cfg::Config> Slot<T, C> {
             self.gen
                 .compare_exchange(current_gen, next_gen, Ordering::AcqRel, Ordering::Acquire)
         {
-            #[cfg(test)]
-            println!(
+            test_println!(
                 "-> already removed; actual_gen={:?}; previous={:?};",
-                _actual, current_gen
+                _actual,
+                current_gen
             );
             return None;
         }
 
-        #[cfg(test)]
-        println!("-> next generation={:?};", next_gen);
+        test_println!("-> next generation={:?};", next_gen);
 
         loop {
             let refs = self.refs.load(Ordering::Acquire);
 
-            #[cfg(test)]
             print!("-> refs={:?}", refs);
 
             if refs & Lifecycle::REFS_MASK == 0 {
-                #[cfg(test)]
-                println!("; ok to remove!");
+                test_println!("; ok to remove!");
                 return self.item.with_mut(|item| unsafe { (*item).take() });
             }
 
-            #[cfg(test)]
-            println!("; spin");
+            test_println!("; spin");
             atomic::spin_loop_hint();
         }
     }
@@ -234,8 +227,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
     #[inline]
     pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
         let current = self.gen.load(Ordering::Acquire);
-        #[cfg(test)]
-        println!("-> remove={:?}; current={:?};", gen, current);
+
+        test_println!("-> remove={:?}; current={:?};", gen, current);
 
         // Is the index's generation the same as the current generation? If not,
         // the item that index referred to was already removed.
@@ -305,7 +298,7 @@ impl<'a, T> Guard<'a, T> {
             let lifecycle = Lifecycle::from(state);
             // if refs == 0 {
             //     #[cfg(test)]
-            //     println!("drop on 0 refs; something is weird!");
+            //     test_println!("drop on 0 refs; something is weird!");
             //     state = self.refs.load(Ordering::Acquire);
             //     continue;
             // }
@@ -315,10 +308,13 @@ impl<'a, T> Guard<'a, T> {
             } else {
                 (refs - 1) << Lifecycle::REFS_SHIFT | lifecycle as usize
             };
-            #[cfg(test)]
-            println!(
+
+            test_println!(
                 "-> drop guard; lifecycle={:?}; refs={:?}; new_state={:#x}; dropping={:?}",
-                lifecycle, refs, new_state, dropping
+                lifecycle,
+                refs,
+                new_state,
+                dropping
             );
             match self
                 .refs
@@ -326,8 +322,7 @@ impl<'a, T> Guard<'a, T> {
             {
                 Ok(_) => return dropping,
                 Err(actual) => {
-                    #[cfg(test)]
-                    println!("-> drop guard; retry, actual={:?}", actual);
+                    test_println!("-> drop guard; retry, actual={:?}", actual);
                     state = actual;
                 }
             }

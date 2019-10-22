@@ -109,7 +109,7 @@ impl<C> fmt::Debug for Tid<C> {
                 .finish()
         } else {
             f.debug_tuple("Tid")
-                .field(&format_args!("{:#x}", self.id))
+                .field(&format_args!("{}", self.id))
                 .finish()
         }
     }

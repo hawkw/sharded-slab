@@ -165,7 +165,6 @@
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.3")]
 
-#[cfg(test)]
 macro_rules! thread_local {
     ($($tts:tt)+) => { loom::thread_local!{ $($tts)+ } }
 }
@@ -173,6 +172,17 @@ macro_rules! thread_local {
 #[cfg(not(test))]
 macro_rules! thread_local {
     ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
+}
+
+macro_rules! test_println {
+    ($($arg:tt)*) => {
+        println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+    }
+}
+
+#[cfg(not(test))]
+macro_rules! test_println {
+    ($($arg:tt)*) => {};
 }
 
 pub mod implementation;
@@ -291,8 +301,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::<C>::current();
-        #[cfg(test)]
-        println!("insert {:?}", tid);
+        test_println!("insert {:?}", tid);
         self.shards[tid.as_usize()]
             .insert(value)
             .map(|idx| tid.pack(idx))
@@ -343,8 +352,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// [`take`]: #method.take
     pub fn remove(&self, idx: usize) -> bool {
         let tid = C::unpack_tid(idx);
-        #[cfg(test)]
-        println!("rm_deferred {:?}", tid);
+
+        test_println!("rm_deferred {:?}", tid);
         self.shards
             .get(tid.as_usize())
             .map(|shard| shard.remove(idx))
@@ -400,8 +409,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// [`remove`]: #method.remove
     pub fn take(&self, idx: usize) -> Option<T> {
         let tid = C::unpack_tid(idx);
-        #[cfg(test)]
-        println!("rm {:?}", tid);
+
+        test_println!("rm {:?}", tid);
         let shard = &self.shards[tid.as_usize()];
         if tid.is_current() {
             shard.remove_local(idx)
@@ -426,8 +435,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
         let tid = C::unpack_tid(key);
-        #[cfg(test)]
-        println!("get {:?}; current={:?}", tid, Tid::<C>::current());
+
+        test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         self.shards.get(tid.as_usize())?.get(key)
     }
 
@@ -489,8 +498,8 @@ impl<T, C: cfg::Config> Shard<T, C> {
         // Can we fit the value into an existing page?
         for (page_idx, page) in self.shared.iter().enumerate() {
             let local = self.local(page_idx);
-            #[cfg(test)]
-            println!("-> page {}; {:?}; {:?}", page_idx, local, page);
+
+            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
             if let Some(poff) = page.insert(local, &mut value) {
                 return Some(poff);
@@ -505,8 +514,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = Self::page_indices(idx);
 
-        #[cfg(test)]
-        println!("-> {:?}", addr);
+        test_println!("-> {:?}", addr);
         if page_index > self.shared.len() {
             return None;
         }
@@ -535,8 +543,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = Self::page_indices(idx);
 
-        #[cfg(test)]
-        println!("-> remove_local {:?}", addr);
+        test_println!("-> remove_local {:?}", addr);
 
         self.shared
             .get(page_index)?
@@ -550,8 +557,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
 
         let (addr, page_index) = Self::page_indices(idx);
 
-        #[cfg(test)]
-        println!("-> remove_remote {:?}; page {:?}", addr, page_index);
+        test_println!("-> remove_remote {:?}; page {:?}", addr, page_index);
 
         self.shared
             .get(page_index)?
@@ -727,5 +733,4 @@ impl<C: cfg::Config> Pack<C> for () {
     }
 }
 
-#[cfg(test)]
 mod tests;
