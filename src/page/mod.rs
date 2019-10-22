@@ -6,6 +6,7 @@ use crate::sync::{
 use crate::Pack;
 
 pub(crate) mod slot;
+mod stack;
 use self::slot::Slot;
 use std::{fmt, marker::PhantomData};
 
@@ -226,22 +227,28 @@ impl<T, C: cfg::Config> Shared<T, C> {
             let slot = slab.get(offset)?;
             let val = slot.remove_value(gen)?;
 
-            while {
-                let next = self.remote_head.load(Ordering::Relaxed);
-
-                test_println!("-> next={:?}", next);
-
+            let mut next = self.remote_head.load(Ordering::Relaxed);
+            loop {
                 slot.set_next(next);
+                test_println!("-> next {:#x}", next);
 
-                let actual = self
-                    .remote_head
-                    .compare_and_swap(next, offset, Ordering::Release);
-                actual != next
-            } {
-                spin_loop_hint();
+                match self.remote_head.compare_exchange(
+                    next,
+                    offset,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    // lost the race!
+                    Err(actual) => {
+                        test_println!("-> retry!");
+                        next = actual;
+                    }
+                    Ok(_) => {
+                        test_println!("-> successful; next={:#x}", next);
+                        return Some(val);
+                    }
+                }
             }
-
-            Some(val)
         })
     }
 

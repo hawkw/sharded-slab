@@ -43,24 +43,29 @@ impl crate::Config for TinyConfig {
     const INITIAL_PAGE_SIZE: usize = 4;
 }
 
-fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
-    run_builder(name, loom::model::Builder::new(), f)
-}
+use self::util::*;
+pub(super) mod util {
+    use super::*;
 
-fn run_builder(
-    name: &'static str,
-    builder: loom::model::Builder,
-    f: impl Fn() + Sync + Send + 'static,
-) {
-    let iters = AtomicUsize::new(1);
-    builder.check(move || {
-        test_println!(
-            "\n------------ running test {}; iteration {} ------------\n",
-            name,
-            iters.fetch_add(1, Ordering::SeqCst)
-        );
-        f()
-    });
+    pub(crate) fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
+        run_builder(name, loom::model::Builder::new(), f)
+    }
+
+    pub(crate) fn run_builder(
+        name: &'static str,
+        builder: loom::model::Builder,
+        f: impl Fn() + Sync + Send + 'static,
+    ) {
+        let iters = AtomicUsize::new(1);
+        builder.check(move || {
+            test_println!(
+                "\n------------ running test {}; iteration {} ------------\n",
+                name,
+                iters.fetch_add(1, Ordering::SeqCst)
+            );
+            f()
+        });
+    }
 }
 
 #[test]
