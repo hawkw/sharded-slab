@@ -314,6 +314,7 @@ impl<C: cfg::Config> Clone for Addr<C> {
 
 impl<C: cfg::Config> Copy for Addr<C> {}
 
+#[cfg(test)]
 mod test {
     use super::*;
     use crate::Pack;

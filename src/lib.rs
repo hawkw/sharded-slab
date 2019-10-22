@@ -174,6 +174,7 @@ macro_rules! thread_local {
     ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
 }
 
+#[cfg(test)]
 macro_rules! test_println {
     ($($arg:tt)*) => {
         println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
@@ -733,4 +734,5 @@ impl<C: cfg::Config> Pack<C> for () {
     }
 }
 
+#[cfg(test)]
 mod tests;
