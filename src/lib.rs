@@ -206,6 +206,16 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
+impl<'a, T, C> Guard<'a, T, C>
+where
+    C: cfg::Config,
+{
+    /// Returns the idx of the guard.
+    pub fn idx(&self) -> usize {
+        self.key
+    }
+}
+
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
 // ├─────────────┤ ┌───▶│  next──┼─┐
