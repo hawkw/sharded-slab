@@ -174,16 +174,12 @@ macro_rules! thread_local {
     ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
 }
 
-#[cfg(test)]
 macro_rules! test_println {
     ($($arg:tt)*) => {
-        println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+        if cfg!(test) {
+            println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+        }
     }
-}
-
-#[cfg(not(test))]
-macro_rules! test_println {
-    ($($arg:tt)*) => {};
 }
 
 pub mod implementation;
