@@ -160,7 +160,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
             let gen = slot.insert(t);
             local.set_head(slot.next());
             gen
-        });
+        })?;
 
         let index = head + self.prev_sz;
 
@@ -169,7 +169,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
     }
 
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T>> {
+    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
         let poff = addr.offset() - self.prev_sz;
 
         test_println!("-> offset {:?}", poff);

@@ -212,7 +212,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, T>,
+    inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
