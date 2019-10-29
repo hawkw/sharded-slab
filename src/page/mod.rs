@@ -1,8 +1,5 @@
 use crate::cfg::{self, CfgPrivate};
-use crate::sync::{
-    atomic::{spin_loop_hint, AtomicUsize, Ordering},
-    CausalCell,
-};
+use crate::sync::CausalCell;
 use crate::Pack;
 
 pub(crate) mod slot;

@@ -165,6 +165,7 @@
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.3")]
 
+#[cfg(test)]
 macro_rules! thread_local {
     ($($tts:tt)+) => { loom::thread_local!{ $($tts)+ } }
 }

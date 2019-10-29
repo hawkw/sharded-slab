@@ -1,5 +1,5 @@
 use crate::cfg;
-use crate::sync::atomic::{spin_loop_hint, AtomicUsize, Ordering};
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use std::{fmt, marker::PhantomData};
 
 pub(super) struct TransferStack<C = cfg::DefaultConfig> {

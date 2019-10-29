@@ -90,6 +90,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
     pub(in crate::page) fn get(&self, gen: Generation<C>) -> Option<Guard<'_, T, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
+            // Unpack the current state.
             let state = Lifecycle::<C>::from_packed(lifecycle);
             let current_gen = LifecycleGen::<C>::from_packed(lifecycle).0;
             let refs = RefCount::<C>::from_packed(lifecycle);
@@ -103,13 +104,16 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 refs,
             );
 
-            // Is the index's generation the same as the current generation? If not,
-            // the item that index referred to was removed, so return `None`.
+            // Is it okay to access this slot? The accessed generation must be
+            // current, and the slot must not be in the process of being
+            // removed. If we can no longer access the slot at the given
+            // generation, return `None`.
             if gen != current_gen || state != Lifecycle::NOT_REMOVED {
                 test_println!("-> get: no longer exists!");
                 return None;
             }
 
+            // Try to increment the slot's ref count by one.
             let new_refs = refs.incr();
             match self.lifecycle.compare_exchange(
                 lifecycle,
@@ -118,6 +122,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
+                    // Okay, the ref count was incremented successfully! We can
+                    // now return a guard!
                     let item = self.value()?;
 
                     test_println!("-> {:?}", new_refs);
@@ -129,6 +135,12 @@ impl<T, C: cfg::Config> Slot<T, C> {
                     });
                 }
                 Err(actual) => {
+                    // Another thread modified the slot's state before us! We
+                    // need to retry with the new state.
+                    //
+                    // Since the new state may mean that the accessed generation
+                    // is no longer valid, we'll check again on the next
+                    // iteration of the loop.
                     test_println!("-> get: retrying; lifecycle={:#x};", actual);
                     lifecycle = actual;
                 }
@@ -149,6 +161,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
         );
         debug_assert!(value.is_some(), "inserted twice");
 
+        // Load the current lifecycle state.
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
         let gen = LifecycleGen::from_packed(lifecycle).0;
         let refs = RefCount::<C>::from_packed(lifecycle);
@@ -159,22 +172,29 @@ impl<T, C: cfg::Config> Slot<T, C> {
             gen,
             refs
         );
+
+        // If a reference to the slot currently exists, we can't modify the
+        // value!
+        // TODO(eliza): is this a bug/should this just be an assertion rather
+        // than returning `None`?
         if refs.value != 0 {
             test_println!("-> insert while referenced! cancelling");
             return None;
         }
+
+        // Set the slot's state to NOT_REMOVED.
         let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(0));
-        if let Err(_actual) = self.lifecycle.compare_exchange(
-            lifecycle,
-            new_lifecycle,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        let actual = self
+            .lifecycle
+            .compare_and_swap(lifecycle, new_lifecycle, Ordering::AcqRel);
+        if actual != lifecycle {
+            // The slot was modified while we were inserting to it! It's no
+            // longer safe to insert a new value.
             test_println!(
                 "-> modified during insert, cancelling! new={:#x}; expected={:#x}; actual={:#x};",
                 new_lifecycle,
                 lifecycle,
-                _actual
+                actual
             );
             return None;
         }
@@ -197,9 +217,12 @@ impl<T, C: cfg::Config> Slot<T, C> {
     #[inline]
     pub(super) fn remove(&self, gen: Generation<C>) -> bool {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
-        let mut curr_gen = LifecycleGen::from_packed(lifecycle).0;
-        let prev;
+        let mut curr_gen;
+
+        // Try to advance the slot's state to "MARKED", which indicates that it
+        // should be removed when it is no longer concurrently accessed.
         loop {
+            curr_gen = LifecycleGen::from_packed(lifecycle).0;
             test_println!(
                 "-> remove deferred; gen={:?}; current_gen={:?};",
                 gen,
@@ -211,36 +234,31 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 return false;
             }
 
+            // Set the new state to `MARKED`.
             let new_lifecycle = Lifecycle::<C>::MARKED.pack(lifecycle);
             test_println!(
                 "-> remove deferred; old_lifecycle={:#x}; new_lifecycle={:#x};",
                 lifecycle,
                 new_lifecycle
             );
+
             match self.lifecycle.compare_exchange(
                 lifecycle,
                 new_lifecycle,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(actual) => {
-                    prev = actual;
-                    break;
-                }
+                Ok(_) => break,
                 Err(actual) => {
                     test_println!("-> remove deferred; retrying");
                     lifecycle = actual;
-                    curr_gen = LifecycleGen::from_packed(lifecycle).0;
                 }
             }
         }
 
-        let refs = RefCount::<C>::from_packed(prev);
-        test_println!(
-            "-> remove deferred; marked, prev={:#2x}; refs={:?};",
-            prev,
-            refs
-        );
+        // Unpack the current reference count to see if we can remove the slot now.
+        let refs = RefCount::<C>::from_packed(lifecycle);
+        test_println!("-> remove_deferred: marked; refs={:?};", refs);
 
         // Are there currently outstanding references to the slot? If so, it
         // will have to be removed when those references are dropped.
@@ -248,28 +266,28 @@ impl<T, C: cfg::Config> Slot<T, C> {
             return true;
         }
 
-        // We are releasing the slot, acquire the memory now.
-        atomic::fence(Ordering::Acquire);
-
         // Otherwise, we can remove the slot now!
-
         test_println!("-> remove deferred; can remove now");
-        self.remove_inner(curr_gen).is_some()
+        self.remove_value(curr_gen).is_some()
     }
 
     #[inline]
-    fn remove_inner(&self, current_gen: Generation<C>) -> Option<T> {
+    pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut advanced = false;
-        let next_gen = current_gen.advance();
+        let next_gen = gen.advance();
         loop {
-            let gen = Generation::from_packed(lifecycle);
+            let current_gen = Generation::from_packed(lifecycle);
             test_println!("-> remove_inner; lifecycle={:#x}; expected_gen={:?}; current_gen={:?}; next_gen={:?};",
                 lifecycle,
+                gen,
                 current_gen,
-                next_gen,
-                gen
+                next_gen
             );
+            // First, make sure we are actually able to remove the value.
+            // If we're going to remove the value, the generation has to match
+            // the value that `remove_value` was called with...unless we've
+            // already stored the new generation.
             if (!advanced) && gen != current_gen {
                 test_println!("-> already removed!");
                 return None;
@@ -281,16 +299,22 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 Ordering::Acquire,
             ) {
                 Ok(actual) => {
+                    // If we're in this state, we have successfully advanced to
+                    // the next generation.
                     advanced = true;
+
+                    // Make sure that there are no outstanding references.
                     let refs = RefCount::<C>::from_packed(actual);
                     test_println!("-> advanced gen; lifecycle={:#x}; refs={:?};", actual, refs);
                     if refs.value == 0 {
                         test_println!("-> ok to remove!");
                         return self.item.with_mut(|item| unsafe { (*item).take() });
-                    } else {
-                        test_println!("-> refs={:?}; spin...", refs);
-                        atomic::spin_loop_hint();
                     }
+
+                    // Otherwise, a reference must be dropped before we can
+                    // remove the value. Spin here until there are no refs remaining...
+                    test_println!("-> refs={:?}; spin...", refs);
+                    atomic::spin_loop_hint();
                 }
                 Err(actual) => {
                     test_println!("-> retrying; lifecycle={:#x};", actual);
@@ -298,11 +322,6 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 }
             }
         }
-    }
-
-    #[inline]
-    pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
-        self.remove_inner(gen)
     }
 
     #[inline(always)]
@@ -376,42 +395,39 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
         loop {
             let refs = RefCount::<C>::from_packed(lifecycle);
             let state = Lifecycle::<C>::from_packed(lifecycle).state;
-            // if refs == 0 {
-            //     #[cfg(test)]
-            //     test_println!("drop on 0 refs; something is weird!");
-            //     state = self.refs.load(Ordering::Acquire);
-            //     continue;
-            // }
+            let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+
+            // Are we the last guard, and is the slot marked for removal?
             let dropping = refs.value == 1 && state == State::Marked;
-            let new_state = if dropping {
-                State::Removing as usize
+            let new_lifecycle = if dropping {
+                // If so, we want to advance the state to "removing"
+                gen.pack(State::Removing as usize)
             } else {
+                // Otherwise, just subtract 1 from the ref count.
                 refs.decr().pack(lifecycle)
             };
 
             test_println!(
-                "-> drop guard; lifecycle={:?}; refs={:?}; new_state={:#x}; dropping={:?}",
-                lifecycle,
+                "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
+                state,
+                gen,
                 refs,
-                new_state,
+                lifecycle,
+                new_lifecycle,
                 dropping
             );
             match self.lifecycle.compare_exchange(
                 lifecycle,
-                new_state,
+                new_lifecycle,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
-                    test_println!(
-                        "-> drop guard: done; new_state={:#x}; dropping={:?}",
-                        new_state,
-                        dropping
-                    );
+                    test_println!("-> drop guard: done;  dropping={:?}", dropping);
                     return dropping;
                 }
                 Err(actual) => {
-                    test_println!("-> drop guard; retry, actual={:?}", actual);
+                    test_println!("-> drop guard; retry, actual={:#x}", actual);
                     lifecycle = actual;
                 }
             }
@@ -492,15 +508,12 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 }
 
 impl<C: cfg::Config> RefCount<C> {
-    const ONE: Self = Self {
-        value: 1,
-        _cfg: PhantomData,
-    };
-
+    #[inline]
     fn incr(self) -> Self {
         Self::from_usize((self.value + 1) % Self::BITS)
     }
 
+    #[inline]
     fn decr(self) -> Self {
         Self::from_usize(self.value.saturating_sub(1))
     }
