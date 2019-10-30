@@ -1,36 +1,44 @@
-# 0.0.4 (October 21, 2019)
+<a name="0.0.4"></a>
+## 0.0.4 (2019-21-30)
 
-### Changed
 
-- Renamed `Slab::remove` to `Slab::take`.
+#### Features
 
-### Added
+*   prevent items from being removed while concurrently accessed ([872c81d1](872c81d1))
+*   added `Slab::remove` method that marks an item to be removed when the last thread
+    accessing it finishes ([872c81d1](872c81d1))
 
-- Guards that ensure items are not removed while concurrently accessed.
-- `Slab::remove` method that marks an item to be removed when the last thread
-  accessing it finishes.
+#### Bug Fixes
 
-### Fixed
+*   nicer handling of races in remove ([475d9a06](475d9a06))
 
-- Potential races between two removals.
+#### Breaking Changes
 
-# 0.0.3 (October 7, 2019)
+*   renamed `Slab::remove` to `Slab::take` ([872c81d1](872c81d1))
+*   `Slab::get` now returns a `Guard` type ([872c81d1](872c81d1))
 
-### Removed
+<a name="0.0.3"></a>
+## 0.0.3 (2019-07-30)
 
-- `len` and `capacity` APIs that had the potential to be racy.
 
-### Fixed
+#### Bug Fixes
 
-- Potential race between `remove` and `insert`.
-- False sharing that could impact performance.
+*   split local/remote to fix false sharing & potential races ([69f95fb0](69f95fb0))
+*   set next pointer _before_ head ([cc7a0bf1](cc7a0bf1))
 
-# 0.0.2 (October 3, 2019)
+#### Breaking Changes
 
-### Fixed
+*   removed potentially racy `Slab::len` and `Slab::capacity` methods ([27af7d6c](27af7d6c))
 
-- Compiler error in release mode.
+<a name="0.0.2"></a>
+## 0.0.2 (2019-03-30)
 
-# 0.0.1 (October 2, 2019)
+
+#### Bug Fixes
+
+*   fix compilation failure in release mode ([617031da](617031da))
+
+<a name="0.0.1"></a>
+## 0.0.1 (2019-02-30)
 
 - Initial release
