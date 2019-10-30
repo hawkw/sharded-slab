@@ -1,11 +1,9 @@
 use crate::cfg::{self, CfgPrivate};
-use crate::sync::{
-    atomic::{spin_loop_hint, AtomicUsize, Ordering},
-    CausalCell,
-};
+use crate::sync::CausalCell;
 use crate::Pack;
 
 pub(crate) mod slot;
+mod stack;
 use self::slot::Slot;
 use std::{fmt, marker::PhantomData};
 
@@ -63,7 +61,7 @@ pub(crate) struct Local {
 }
 
 pub(crate) struct Shared<T, C> {
-    remote_head: AtomicUsize,
+    remote: stack::TransferStack<C>,
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Box<[Slot<T, C>]>>>,
@@ -96,15 +94,14 @@ impl<T, C: cfg::Config> Shared<T, C> {
         Self {
             prev_sz,
             size,
-            remote_head: AtomicUsize::new(Self::NULL),
+            remote: stack::TransferStack::new(),
             slab: CausalCell::new(None),
         }
     }
 
     #[cold]
     fn fill(&self) {
-        #[cfg(test)]
-        println!("-> alloc new page ({})", self.size);
+        test_println!("-> alloc new page ({})", self.size);
 
         debug_assert!(self.slab.with(|s| unsafe { (*s).is_none() }));
 
@@ -125,8 +122,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
     #[inline]
     pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
         let head = local.head();
-        #[cfg(test)]
-        println!("-> local head {:?}", head);
+
+        test_println!("-> local head {:?}", head);
 
         // are there any items on the local free list? (fast path)
         let head = if head < self.size {
@@ -134,17 +131,16 @@ impl<T, C: cfg::Config> Shared<T, C> {
         } else {
             // if the local free list is empty, pop all the items on the remote
             // free list onto the local free list.
-            let head = self.remote_head.swap(Self::NULL, Ordering::Acquire);
-            #[cfg(test)]
-            println!("-> remote head {:?}", head);
-            head
+            let head = self.remote.pop_all();
+
+            test_println!("-> remote head {:?}", head);
+            head?
         };
 
         // if the head is still null, both the local and remote free lists are
         // empty --- we can't fit any more items on this page.
         if head == Self::NULL {
-            #[cfg(test)]
-            println!("-> NULL! {:?}", head);
+            test_println!("-> NULL! {:?}", head);
             return None;
         }
 
@@ -161,19 +157,19 @@ impl<T, C: cfg::Config> Shared<T, C> {
             let gen = slot.insert(t);
             local.set_head(slot.next());
             gen
-        });
+        })?;
 
         let index = head + self.prev_sz;
-        #[cfg(test)]
-        println!("insert at offset: {}", index);
+
+        test_println!("insert at offset: {}", index);
         Some(gen.pack(index))
     }
 
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T>> {
+    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
         let poff = addr.offset() - self.prev_sz;
-        #[cfg(test)]
-        println!("-> offset {:?}", poff);
+
+        test_println!("-> offset {:?}", poff);
 
         self.slab.with(|slab| {
             unsafe { &*slab }
@@ -185,8 +181,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
 
     pub(crate) fn remove(&self, addr: Addr<C>, gen: slot::Generation<C>) -> bool {
         let offset = addr.offset() - self.prev_sz;
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
@@ -206,8 +202,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
     ) -> Option<T> {
         let offset = addr.offset() - self.prev_sz;
 
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
@@ -222,30 +217,13 @@ impl<T, C: cfg::Config> Shared<T, C> {
     pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
         let offset = addr.offset() - self.prev_sz;
 
-        #[cfg(test)]
-        println!("-> offset {:?}", offset);
+        test_println!("-> offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
             let slot = slab.get(offset)?;
             let val = slot.remove_value(gen)?;
-
-            while {
-                let next = self.remote_head.load(Ordering::Relaxed);
-
-                #[cfg(test)]
-                println!("-> next={:?}", next);
-
-                slot.set_next(next);
-
-                let actual = self
-                    .remote_head
-                    .compare_and_swap(next, offset, Ordering::Release);
-                actual != next
-            } {
-                spin_loop_hint();
-            }
-
+            self.remote.push(offset, |next| slot.set_next(next));
             Some(val)
         })
     }
@@ -270,10 +248,7 @@ impl fmt::Debug for Local {
 impl<C, T> fmt::Debug for Shared<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Shared")
-            .field(
-                "remote_head",
-                &format_args!("{:#0x}", &self.remote_head.load(Ordering::Relaxed)),
-            )
+            .field("remote", &self.remote)
             .field("prev_sz", &self.prev_sz)
             .field("size", &self.size)
             // .field("slab", &self.slab)

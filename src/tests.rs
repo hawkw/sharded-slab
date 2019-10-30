@@ -43,16 +43,29 @@ impl crate::Config for TinyConfig {
     const INITIAL_PAGE_SIZE: usize = 4;
 }
 
-fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
-    let iters = AtomicUsize::new(0);
-    loom::model(move || {
-        println!(
-            "\n------------ running test {}; iteration {} ------------\n",
-            name,
-            iters.fetch_add(1, Ordering::SeqCst)
-        );
-        f()
-    });
+use self::util::*;
+pub(super) mod util {
+    use super::*;
+
+    pub(crate) fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
+        run_builder(name, loom::model::Builder::new(), f)
+    }
+
+    pub(crate) fn run_builder(
+        name: &'static str,
+        builder: loom::model::Builder,
+        f: impl Fn() + Sync + Send + 'static,
+    ) {
+        let iters = AtomicUsize::new(1);
+        builder.check(move || {
+            test_println!(
+                "\n------------ running test {}; iteration {} ------------\n",
+                name,
+                iters.fetch_add(1, Ordering::SeqCst)
+            );
+            f()
+        });
+    }
 }
 
 #[test]
@@ -200,7 +213,7 @@ fn concurrent_insert_take() {
         let remover = thread::spawn(move || {
             let (lock, cvar) = &*pair2;
             for i in 0..2 {
-                println!("--- remover i={} ---", i);
+                test_println!("--- remover i={} ---", i);
                 let mut next = lock.lock().unwrap();
                 while next.is_none() {
                     next = cvar.wait(next).unwrap();
@@ -213,7 +226,7 @@ fn concurrent_insert_take() {
 
         let (lock, cvar) = &*pair;
         for i in 0..2 {
-            println!("--- inserter i={} ---", i);
+            test_println!("--- inserter i={} ---", i);
             let key = slab.insert(i).expect("insert");
 
             let mut next = lock.lock().unwrap();
@@ -259,6 +272,59 @@ fn take_remote_and_reuse() {
         assert_eq!(slab.get(idx2).unwrap(), 2, "slab: {:#?}", slab);
         assert_eq!(slab.get(idx3).unwrap(), 3, "slab: {:#?}", slab);
         assert_eq!(slab.get(idx4).unwrap(), 4, "slab: {:#?}", slab);
+    });
+}
+
+fn store_when_free<C: crate::Config>(slab: &Arc<Slab<usize, C>>, t: usize) -> usize {
+    loop {
+        test_println!("try store {:?}", t);
+        if let Some(key) = slab.insert(t) {
+            test_println!("inserted at {:#x}", key);
+            return key;
+        }
+        test_println!("retrying; slab is full...");
+        thread::yield_now();
+    }
+}
+
+struct TinierConfig;
+
+impl crate::Config for TinierConfig {
+    const INITIAL_PAGE_SIZE: usize = 2;
+    const MAX_PAGES: usize = 1;
+}
+
+#[test]
+fn concurrent_remove_remote_and_reuse() {
+    let mut model = loom::model::Builder::new();
+    model.max_branches = 100000;
+    run_builder("concurrent_remove_remote_and_reuse", model, || {
+        let slab = Arc::new(Slab::new_with_config::<TinierConfig>());
+
+        let idx1 = slab.insert(1).unwrap();
+        let idx2 = slab.insert(2).unwrap();
+
+        assert_eq!(slab.get(idx1).unwrap(), 1, "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx2).unwrap(), 2, "slab: {:#?}", slab);
+
+        let s = slab.clone();
+        let s2 = slab.clone();
+
+        let t1 = thread::spawn(move || {
+            s.take(idx1).expect("must remove");
+        });
+
+        let t2 = thread::spawn(move || {
+            s2.take(idx2).expect("must remove");
+        });
+
+        let idx3 = store_when_free(&slab, 3);
+        t1.join().expect("thread 1 should not panic");
+        t2.join().expect("thread 1 should not panic");
+
+        assert!(slab.get(idx1).is_none(), "slab: {:#?}", slab);
+        assert!(slab.get(idx2).is_none(), "slab: {:#?}", slab);
+        assert_eq!(slab.get(idx3).unwrap(), 3, "slab: {:#?}", slab);
     });
 }
 
@@ -409,7 +475,7 @@ fn custom_page_sz() {
         let slab = Slab::<usize>::new_with_config::<TinyConfig>();
 
         for i in 0..1024usize {
-            println!("{}", i);
+            test_println!("{}", i);
             let k = slab.insert(i).expect("insert");
             let v = slab.get(k).expect("get");
             assert_eq!(v, i, "slab: {:#?}", slab);
