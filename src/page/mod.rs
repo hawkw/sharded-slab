@@ -111,8 +111,9 @@ impl<T, C: cfg::Config> Shared<T, C> {
         self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
+    /// Allocates storage for the page's slots.
     #[cold]
-    fn fill(&self) {
+    fn allocate(&self) {
         test_println!("-> alloc new page ({})", self.size);
         debug_assert!(self.is_unallocated());
 
@@ -157,7 +158,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
 
         // do we need to allocate storage for this page?
         if self.is_unallocated() {
-            self.fill();
+            self.allocate();
         }
 
         let gen = self.slab.with(|slab| {
