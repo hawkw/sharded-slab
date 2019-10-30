@@ -18,19 +18,22 @@ pub(crate) struct Addr<C: cfg::Config = cfg::DefaultConfig> {
 impl<C: cfg::Config> Addr<C> {
     const NULL: usize = Self::BITS + 1;
 
-    pub(crate) fn index(&self) -> usize {
+    pub(crate) fn index(self) -> usize {
         // Since every page is twice as large as the previous page, and all page sizes
         // are powers of two, we can determine the page index that contains a given
-        // address by shifting the address down by the smallest page size and
-        // looking at how many twos places necessary to represent that number,
-        // telling us what power of two page size it fits inside of. We can
-        // determine the number of twos places by counting the number of leading
-        // zeros (unused twos places) in the number's binary representation, and
-        // subtracting that count from the total number of bits in a word.
-        cfg::WIDTH - (self.addr + C::INITIAL_SZ >> C::ADDR_INDEX_SHIFT).leading_zeros() as usize
+        // address by counting leading zeros, which tells us what power of two
+        // the offset fits into.
+        //
+        // First, we must shift down to the smallest page size, so that the last
+        // offset on the first page becomes 0.
+        let shifted = (self.addr + C::INITIAL_SZ) >> C::ADDR_INDEX_SHIFT;
+        // Now, we can  determine the number of twos places by counting the
+        // number of leading  zeros (unused twos places) in the number's binary
+        // representation, and subtracting that count from the total number of bits in a word.
+        cfg::WIDTH - shifted.leading_zeros() as usize
     }
 
-    pub(crate) fn offset(&self) -> usize {
+    pub(crate) fn offset(self) -> usize {
         self.addr
     }
 }
@@ -64,8 +67,10 @@ pub(crate) struct Shared<T, C> {
     remote: stack::TransferStack<C>,
     size: usize,
     prev_sz: usize,
-    slab: CausalCell<Option<Box<[Slot<T, C>]>>>,
+    slab: CausalCell<Option<Slots<T, C>>>,
 }
+
+type Slots<T, C> = Box<[Slot<T, C>]>;
 
 impl Local {
     pub(crate) fn new() -> Self {
@@ -99,11 +104,17 @@ impl<T, C: cfg::Config> Shared<T, C> {
         }
     }
 
+    /// Returns `true` if storage is currently allocated for this page, `false`
+    /// otherwise.
+    #[inline]
+    fn is_unallocated(&self) -> bool {
+        self.slab.with(|s| unsafe { (*s).is_none() })
+    }
+
     #[cold]
     fn fill(&self) {
         test_println!("-> alloc new page ({})", self.size);
-
-        debug_assert!(self.slab.with(|s| unsafe { (*s).is_none() }));
+        debug_assert!(self.is_unallocated());
 
         let mut slab = Vec::with_capacity(self.size);
         slab.extend((1..self.size).map(Slot::new));
@@ -145,7 +156,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
         }
 
         // do we need to allocate storage for this page?
-        if self.slab.with(|s| unsafe { (*s).is_none() }) {
+        if self.is_unallocated() {
             self.fill();
         }
 
@@ -228,7 +239,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
         })
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> Option<Iter<'a, T, C>> {
+    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
         let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
         slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
     }

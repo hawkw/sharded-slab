@@ -149,16 +149,13 @@ impl<T, C: cfg::Config> Slot<T, C> {
     }
 
     #[inline(always)]
-    pub(super) fn value<'a>(&'a self) -> Option<&'a T> {
+    pub(super) fn value(&self) -> Option<&T> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
     #[inline]
     pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
-        debug_assert!(
-            self.item.with(|item| unsafe { (*item).is_none() }),
-            "inserted into full slot"
-        );
+        debug_assert!(self.is_empty(), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
 
         // Load the current lifecycle state.
@@ -329,6 +326,10 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.next.with_mut(|n| unsafe {
             (*n) = next;
         })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.item.with(|item| unsafe { (*item).is_none() })
     }
 }
 
