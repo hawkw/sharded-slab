@@ -475,6 +475,20 @@ impl<T> Default for Slab<T> {
     }
 }
 
+impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Slab")
+            .field("shards", &self.shards)
+            .field("Config", &C::debug())
+            .finish()
+    }
+}
+
+unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
+unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
+
+// === impl Shard ===
+
 impl<T, C: cfg::Config> Shard<T, C> {
     fn new(tid: usize) -> Self {
         let mut total_sz = 0;
@@ -584,18 +598,6 @@ impl<T, C: cfg::Config> Shard<T, C> {
         self.shared.iter()
     }
 }
-
-impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Slab")
-            .field("shards", &self.shards)
-            .field("Config", &C::debug())
-            .finish()
-    }
-}
-
-unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
-unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
 impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
