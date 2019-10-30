@@ -469,6 +469,12 @@ impl<T, C: cfg::Config> Slab<T, C> {
     }
 }
 
+impl<T> Default for Slab<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T, C: cfg::Config> Shard<T, C> {
     fn new(tid: usize) -> Self {
         let mut total_sz = 0;
