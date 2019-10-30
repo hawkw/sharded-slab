@@ -16,11 +16,10 @@ use std::{
 use lazy_static::lazy_static;
 
 /// Uniquely identifies a thread.
-// #[repr(transparent)]
-#[derive(Hash)]
 pub(crate) struct Tid<C> {
     id: usize,
-    _not_send: PhantomData<(UnsafeCell<()>, fn(C))>,
+    _not_send: PhantomData<UnsafeCell<()>>,
+    _cfg: PhantomData<fn(C)>,
 }
 
 #[derive(Debug)]
@@ -55,10 +54,10 @@ impl<C: cfg::Config> Pack<C> for Tid<C> {
 
     #[inline(always)]
     fn from_usize(id: usize) -> Self {
-        debug_assert!(id <= Self::BITS);
         Self {
             id,
             _not_send: PhantomData,
+            _cfg: PhantomData,
         }
     }
 }
@@ -71,27 +70,25 @@ impl<C: cfg::Config> Tid<C> {
             .unwrap_or_else(|_| Self::poisoned())
     }
 
-    pub(crate) fn is_current(&self) -> bool {
+    pub(crate) fn is_current(self) -> bool {
         REGISTRATION
-            .try_with(|r| self == &r.current::<C>())
+            .try_with(|r| self == r.current::<C>())
             .unwrap_or(false)
+    }
+
+    #[inline(always)]
+    pub fn new(id: usize) -> Self {
+        Self::from_usize(id)
     }
 }
 
 impl<C> Tid<C> {
-    #[inline(always)]
-    pub fn new(id: usize) -> Self {
-        Self {
-            id,
-            _not_send: PhantomData,
-        }
-    }
-
     #[cold]
     fn poisoned() -> Self {
         Self {
             id: std::usize::MAX,
             _not_send: PhantomData,
+            _cfg: PhantomData,
         }
     }
 
@@ -125,10 +122,7 @@ impl<C> Eq for Tid<C> {}
 
 impl<C: cfg::Config> Clone for Tid<C> {
     fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            _not_send: PhantomData,
-        }
+        Self::new(self.id)
     }
 }
 

@@ -456,7 +456,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     }
 
     /// Returns an iterator over all the items in the slab.
-    pub fn unique_iter<'a>(&'a mut self) -> iter::UniqueIter<'a, T, C> {
+    pub fn unique_iter(&mut self) -> iter::UniqueIter<'_, T, C> {
         let mut shards = self.shards.iter_mut();
         let shard = shards.next().expect("must be at least 1 shard");
         let mut pages = shard.iter();
