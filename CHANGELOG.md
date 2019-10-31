@@ -1,3 +1,17 @@
+<a name="0.0.5"></a>
+## 0.0.5 (2019-10-31)
+
+
+#### Performance
+
+*   consolidate per-slot state into one AtomicUsize (#6) ([f1146d33](f1146d33))
+
+#### Features
+
+*   add Default impl for Slab ([61bb3316](61bb3316))
+
+
+
 <a name="0.0.4"></a>
 ## 0.0.4 (2019-21-30)
 
@@ -16,6 +30,7 @@
 
 *   renamed `Slab::remove` to `Slab::take` ([872c81d1](872c81d1))
 *   `Slab::get` now returns a `Guard` type ([872c81d1](872c81d1))
+
 
 <a name="0.0.3"></a>
 ## 0.0.3 (2019-07-30)
@@ -37,6 +52,7 @@
 #### Bug Fixes
 
 *   fix compilation failure in release mode ([617031da](617031da))
+
 
 <a name="0.0.1"></a>
 ## 0.0.1 (2019-02-30)
