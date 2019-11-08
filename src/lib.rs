@@ -611,6 +611,13 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
 
 // === impl Guard ===
 
+impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
+    /// Returns the key used to access the guard.
+    pub fn key(&self) -> usize {
+        self.key
+    }
+}
+
 impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     type Target = T;
 
