@@ -39,7 +39,7 @@ pub trait Config: Sized {
 pub(crate) trait CfgPrivate: Config {
     const USED_BITS: usize = Generation::<Self>::LEN + Generation::<Self>::SHIFT;
     const INITIAL_SZ: usize = next_pow2(Self::INITIAL_PAGE_SIZE);
-    const MAX_SHARDS: usize = next_pow2(Self::MAX_THREADS);
+    const MAX_SHARDS: usize = next_pow2(Self::MAX_THREADS - 1);
     const ADDR_INDEX_SHIFT: usize = Self::INITIAL_SZ.trailing_zeros() as usize + 1;
 
     fn page_size(n: usize) -> usize {
@@ -126,9 +126,9 @@ impl Config for DefaultConfig {
     const INITIAL_PAGE_SIZE: usize = 32;
 
     #[cfg(target_pointer_width = "64")]
-    const MAX_THREADS: usize = 0xFFF;
+    const MAX_THREADS: usize = 4096;
     #[cfg(target_pointer_width = "32")]
-    const MAX_THREADS: usize = 2048;
+    const MAX_THREADS: usize = 0x7F; // TODO(eliza):
 
     const MAX_PAGES: usize = WIDTH / 2;
 }
