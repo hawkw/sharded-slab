@@ -128,7 +128,8 @@ impl Config for DefaultConfig {
     #[cfg(target_pointer_width = "64")]
     const MAX_THREADS: usize = 4096;
     #[cfg(target_pointer_width = "32")]
-    const MAX_THREADS: usize = 0x7F; // TODO(eliza):
+    // TODO(eliza): can we find enough bits to give 32-bit platforms more threads?
+    const MAX_THREADS: usize = 128;
 
     const MAX_PAGES: usize = WIDTH / 2;
 }
