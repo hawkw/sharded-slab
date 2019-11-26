@@ -178,7 +178,11 @@ macro_rules! thread_local {
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if true {
-            println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+            println!("{} {:?} {}",
+                std::thread::current().name().unwrap_or("???"),
+                crate::Tid::<crate::DefaultConfig>::current(),
+                format_args!($($arg)*)
+            )
         }
     }
 }
@@ -434,7 +438,12 @@ impl<T, C: cfg::Config> Slab<T, C> {
     pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
-        test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
+        test_println!(
+            "get key={:?}; tid={:?}; current={:?}",
+            key,
+            tid,
+            Tid::<C>::current()
+        );
         self.shards.get(tid.as_usize())?.get(key)
     }
 
