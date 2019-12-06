@@ -1,3 +1,16 @@
+<a name="0.0.7"></a>
+### 0.0.7 (2019-12-06)
+
+
+#### Bug Fixes
+
+* **Config:**  compensate for 0 being a valid TID ([b601f5d9](b601f5d9))
+* **DefaultConfig:**
+  *  const overflow on 32-bit ([74d42dd1](74d42dd1), closes [#10](10))
+  *  wasted bit patterns on 64-bit ([8cf33f66](8cf33f66))
+
+
+
 <a name="0.0.6"></a>
 ## 0.0.6 (2019-11-08)
 
