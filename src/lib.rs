@@ -185,6 +185,9 @@ macro_rules! test_println {
 
 pub mod implementation;
 mod page;
+#[cfg(feature = "pool")]
+pub mod pool;
+#[cfg(not(feature = "pool"))]
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -233,7 +236,7 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
 //                      │XXXXXXXX│
 //                      └────────┘
 //                         ...
-struct Shard<T, C: cfg::Config> {
+struct Shard<T, C: cfg::Config, P> {
     /// The shard's parent thread ID.
     tid: usize,
     /// The local free list for each page.

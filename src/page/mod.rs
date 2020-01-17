@@ -63,14 +63,14 @@ pub(crate) struct Local {
     head: CausalCell<usize>,
 }
 
-pub(crate) struct Shared<T, C> {
+pub(crate) struct Shared<T, C, P> {
     remote: stack::TransferStack<C>,
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Slots<T, C>>>,
 }
 
-type Slots<T, C> = Box<[Slot<T, C>]>;
+type Slots<T, C> = Box<[Slot<T, C, P>]>;
 
 impl Local {
     pub(crate) fn new() -> Self {

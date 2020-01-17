@@ -5,18 +5,25 @@ use crate::sync::{
 use crate::{cfg, Pack, Tid};
 use std::{fmt, marker::PhantomData};
 
-pub(crate) struct Slot<T, C> {
+pub(crate) struct Slot<T, C, P> {
     lifecycle: AtomicUsize,
     /// The offset of the next item on the free list.
     next: CausalCell<usize>,
     /// The data stored in the slot.
-    item: CausalCell<Option<T>>,
+    item: CausalCell<Item<T, P>>,
     _cfg: PhantomData<fn(C)>,
 }
 
+#[derive(Default)]
+struct Item<T, P> {
+    item: Option<T>,
+    pooled: P,
+}
+
 #[derive(Debug)]
-pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
+pub(crate) struct Guard<'a, T, C, P> {
     item: &'a T,
+    pooled: &'a P,
     lifecycle: &'a AtomicUsize,
     _cfg: PhantomData<fn(C)>,
 }
@@ -76,11 +83,11 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
-impl<T, C: cfg::Config> Slot<T, C> {
+impl<T, C: cfg::Config, P: pool::Clear + Default> Slot<T, C, P> {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
             lifecycle: AtomicUsize::new(0),
-            item: CausalCell::new(None),
+            item: CausalCell::new(Item::default()),
             next: CausalCell::new(next),
             _cfg: PhantomData,
         }
@@ -124,12 +131,13 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 Ok(_) => {
                     // Okay, the ref count was incremented successfully! We can
                     // now return a guard!
-                    let item = self.value()?;
+                    let (item, pooled) = self.value()?;
 
                     test_println!("-> {:?}", new_refs);
 
                     return Some(Guard {
                         item,
+                        pooled,
                         lifecycle: &self.lifecycle,
                         _cfg: PhantomData,
                     });
@@ -149,8 +157,11 @@ impl<T, C: cfg::Config> Slot<T, C> {
     }
 
     #[inline(always)]
-    pub(super) fn value(&self) -> Option<&T> {
-        self.item.with(|item| unsafe { (&*item).as_ref() })
+    pub(super) fn value(&self) -> Option<(&T, &P)> {
+        self.item.with(|val| unsafe {
+            let val = (&*val);
+            Some((val.item.as_ref()?, val.pooled))
+        })
     }
 
     #[inline]
