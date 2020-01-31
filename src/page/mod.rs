@@ -314,7 +314,7 @@ impl<C: cfg::Config> Clone for Addr<C> {
 impl<C: cfg::Config> Copy for Addr<C> {}
 
 #[inline(always)]
-pub(crate) fn indices<C: cfg::Config>(idx: usize) -> (page::Addr<C>, usize) {
+pub(crate) fn indices<C: cfg::Config>(idx: usize) -> (Addr<C>, usize) {
     let addr = C::unpack_addr(idx);
     (addr, addr.index())
 }

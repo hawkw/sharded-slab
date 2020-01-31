@@ -177,7 +177,7 @@ macro_rules! thread_local {
 
 macro_rules! test_println {
     ($($arg:tt)*) => {
-        if cfg!(test) || cfg!(slab_print) {
+        if cfg!(test) && cfg!(slab_print) {
             println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
         }
     }
