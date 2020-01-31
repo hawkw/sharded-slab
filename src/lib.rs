@@ -506,12 +506,6 @@ impl<T, C: cfg::Config> Shard<T, C> {
         Self { tid, local, shared }
     }
 
-    #[inline(always)]
-    pub(crate) fn page_indices(idx: usize) -> (page::Addr<C>, usize) {
-        let addr = C::unpack_addr(idx);
-        (addr, addr.index())
-    }
-
     fn insert(&self, value: T) -> Option<usize> {
         let mut value = Some(value);
 
@@ -532,7 +526,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     #[inline(always)]
     fn get(&self, idx: usize) -> Option<Guard<'_, T, C>> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = Self::page_indices(idx);
+        let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> {:?}", addr);
         if page_index > self.shared.len() {
@@ -549,7 +543,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
 
     fn remove_local(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = Self::page_indices(idx);
+        let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
             return false;
@@ -560,7 +554,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
 
     fn remove_remote(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = Self::page_indices(idx);
+        let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
             return false;
@@ -573,7 +567,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     /// Remove an item on the shard's local thread.
     fn take_local(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = Self::page_indices(idx);
+        let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> remove_local {:?}", addr);
 
@@ -587,7 +581,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::<C>::current().as_usize() != self.tid);
 
-        let (addr, page_index) = Self::page_indices(idx);
+        let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> take_remote {:?}; page {:?}", addr, page_index);
 
