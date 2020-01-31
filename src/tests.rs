@@ -498,18 +498,38 @@ mod free_list_reuse {
 
             let t1 = slab.insert("hello").expect("insert");
             let t2 = slab.insert("world").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t1).1, 0);
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t2).1, 0);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t1).1,
+                0,
+                "1st slot should be on 0th page"
+            );
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t2).1,
+                0,
+                "2nd slot should be on 0th page"
+            );
             let t3 = slab.insert("earth").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t3).1, 1);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t3).1,
+                1,
+                "3rd slot should be on 1st page"
+            );
 
             slab.remove(t2);
             let t4 = slab.insert("universe").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t4).1, 0);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t4).1,
+                0,
+                "2nd slot should be reused (0th page)"
+            );
 
             slab.remove(t1);
-            let t5 = slab.insert("goodbye").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t4).1, 0);
+            let _ = slab.insert("goodbye").expect("insert");
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t4).1,
+                0,
+                "1st slot should be reused (0th page)"
+            );
         });
     }
 
@@ -520,18 +540,38 @@ mod free_list_reuse {
 
             let t1 = slab.insert("hello").expect("insert");
             let t2 = slab.insert("world").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t1).1, 0);
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t2).1, 0);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t1).1,
+                0,
+                "1st slot should be on 0th page"
+            );
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t2).1,
+                0,
+                "2nd slot should be on 0th page"
+            );
             let t3 = slab.insert("earth").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t3).1, 1);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t3).1,
+                1,
+                "3rd slot should be on 1st page"
+            );
 
             assert_eq!(slab.take(t2), Some("world"));
             let t4 = slab.insert("universe").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t4).1, 0);
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t4).1,
+                0,
+                "2nd slot should be reused (0th page)"
+            );
 
             assert_eq!(slab.take(t1), Some("hello"));
-            let t5 = slab.insert("goodbye").expect("insert");
-            assert_eq!(crate::Shard::<&str, TinyConfig>::page_indices(t4).1, 0);
+            let _ = slab.insert("goodbye").expect("insert");
+            assert_eq!(
+                crate::page::indices::<TinyConfig>(t4).1,
+                0,
+                "1st slot should be reused (0th page)"
+            );
         });
     }
 }

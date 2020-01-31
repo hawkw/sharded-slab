@@ -25,7 +25,7 @@ harness = false
 lazy_static = "1"
 
 [dev-dependencies]
-loom = { version = "0.2", features = ["checkpoint"] }
+loom = { version = "0.2" }
 proptest = "0.9.4"
 criterion = "0.3"
 slab = "0.4.2"
