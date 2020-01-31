@@ -1,3 +1,13 @@
+<a name="0.0.8"></a>
+### 0.0.8 (2020-01-31)
+
+
+#### Bug Fixes
+
+*   `remove` not adding slots to free lists ([dfdd7aee](dfdd7aee))
+
+
+
 <a name="0.0.7"></a>
 ### 0.0.7 (2019-12-06)
 

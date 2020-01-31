@@ -11,7 +11,7 @@ A lock-free concurrent slab.
 [crates-badge]: https://img.shields.io/crates/v/sharded-slab.svg
 [crates-url]: https://crates.io/crates/sharded-slab
 [docs-badge]: https://docs.rs/sharded-slab/badge.svg
-[docs-url]: https://docs.rs/sharded-slab/0.0.7/sharded_slab
+[docs-url]: https://docs.rs/sharded-slab/0.0.8/sharded_slab
 [ci-badge]: https://github.com/hawkw/sharded-slab/workflows/CI/badge.svg
 [ci-url]: https://github.com/hawkw/sharded-slab/actions?workflow=CI
 [license-badge]: https://img.shields.io/crates/l/sharded-slab
@@ -35,7 +35,7 @@ optimization, and there may still be some lurking bugs.
 First, add this to your `Cargo.toml`:
 
 ```toml
-sharded-slab = "0.0.7"
+sharded-slab = "0.0.8"
 ```
 
 ### Examples
