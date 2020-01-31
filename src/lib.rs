@@ -178,7 +178,7 @@ macro_rules! thread_local {
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if cfg!(test) || cfg!(slab_print) {
-            eprintln!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+            println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
         }
     }
 }
@@ -352,10 +352,12 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(idx);
 
         test_println!("rm_deferred {:?}", tid);
-        self.shards
-            .get(tid.as_usize())
-            .map(|shard| shard.remove(idx))
-            .unwrap_or(false)
+        let shard = self.shards.get(tid.as_usize());
+        if tid.is_current() {
+            shard.map(|shard| shard.remove_local(idx)).unwrap_or(false)
+        } else {
+            shard.map(|shard| shard.remove_remote(idx)).unwrap_or(false)
+        }
     }
 
     /// Removes the value associated with the given key from the slab, returning
@@ -411,9 +413,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
         test_println!("rm {:?}", tid);
         let shard = &self.shards[tid.as_usize()];
         if tid.is_current() {
-            shard.remove_local(idx)
+            shard.take_local(idx)
         } else {
-            shard.remove_remote(idx)
+            shard.take_remote(idx)
         }
     }
 
@@ -545,7 +547,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         })
     }
 
-    fn remove(&self, idx: usize) -> bool {
+    fn remove_local(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = Self::page_indices(idx);
 
@@ -553,11 +555,23 @@ impl<T, C: cfg::Config> Shard<T, C> {
             return false;
         }
 
-        self.shared[page_index].remove(addr, C::unpack_gen(idx))
+        self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
+    }
+
+    fn remove_remote(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = Self::page_indices(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        let shared = &self.shared[page_index];
+        shared.remove(addr, C::unpack_gen(idx), shared.free_list())
     }
 
     /// Remove an item on the shard's local thread.
-    fn remove_local(&self, idx: usize) -> Option<T> {
+    fn take_local(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = Self::page_indices(idx);
 
@@ -565,21 +579,20 @@ impl<T, C: cfg::Config> Shard<T, C> {
 
         self.shared
             .get(page_index)?
-            .remove_local(self.local(page_index), addr, C::unpack_gen(idx))
+            .take(addr, C::unpack_gen(idx), self.local(page_index))
     }
 
     /// Remove an item, while on a different thread from the shard's local thread.
-    fn remove_remote(&self, idx: usize) -> Option<T> {
+    fn take_remote(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::<C>::current().as_usize() != self.tid);
 
         let (addr, page_index) = Self::page_indices(idx);
 
-        test_println!("-> remove_remote {:?}; page {:?}", addr, page_index);
+        test_println!("-> take_remote {:?}; page {:?}", addr, page_index);
 
-        self.shared
-            .get(page_index)?
-            .remove_remote(addr, C::unpack_gen(idx))
+        let shared = self.shared.get(page_index)?;
+        shared.take(addr, C::unpack_gen(idx), shared.free_list())
     }
 
     #[inline(always)]

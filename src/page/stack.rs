@@ -25,7 +25,7 @@ impl<C: cfg::Config> TransferStack<C> {
         }
     }
 
-    pub(super) fn push(&self, value: usize, before: impl Fn(usize)) {
+    fn push(&self, new_head: usize, before: impl Fn(usize)) {
         let mut next = self.head.load(Ordering::Relaxed);
         loop {
             test_println!("-> next {:#x}", next);
@@ -33,7 +33,7 @@ impl<C: cfg::Config> TransferStack<C> {
 
             match self
                 .head
-                .compare_exchange(next, value, Ordering::Release, Ordering::Relaxed)
+                .compare_exchange(next, new_head, Ordering::Release, Ordering::Relaxed)
             {
                 // lost the race!
                 Err(actual) => {
@@ -46,6 +46,12 @@ impl<C: cfg::Config> TransferStack<C> {
                 }
             }
         }
+    }
+}
+
+impl<C: cfg::Config> super::FreeList<C> for TransferStack<C> {
+    fn push<T>(&self, new_head: usize, slot: &super::Slot<T, C>) {
+        self.push(new_head, |next| slot.set_next(next))
     }
 }
 

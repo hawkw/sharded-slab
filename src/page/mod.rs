@@ -38,6 +38,10 @@ impl<C: cfg::Config> Addr<C> {
     }
 }
 
+pub(crate) trait FreeList<C> {
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>);
+}
+
 impl<C: cfg::Config> Pack<C> for Addr<C> {
     const LEN: usize = C::MAX_PAGES + C::ADDR_INDEX_SHIFT;
 
@@ -89,6 +93,13 @@ impl Local {
         self.head.with_mut(|head| unsafe {
             *head = new_head;
         })
+    }
+}
+
+impl<C: cfg::Config> FreeList<C> for Local {
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>) {
+        slot.set_next(self.head());
+        self.set_head(new_head);
     }
 }
 
@@ -191,7 +202,12 @@ impl<T, C: cfg::Config> Shared<T, C> {
         })
     }
 
-    pub(crate) fn remove(&self, addr: Addr<C>, gen: slot::Generation<C>) -> bool {
+    pub(crate) fn remove<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
         let offset = addr.offset() - self.prev_sz;
 
         test_println!("-> offset {:?}", offset);
@@ -199,50 +215,41 @@ impl<T, C: cfg::Config> Shared<T, C> {
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.remove(gen)
+                slot.remove(gen, offset, free_list)
             } else {
                 false
             }
         })
     }
 
-    pub(crate) fn remove_local(
+    pub(crate) fn take<F>(
         &self,
-        local: &Local,
         addr: Addr<C>,
         gen: slot::Generation<C>,
-    ) -> Option<T> {
+        free_list: &F,
+    ) -> Option<T>
+    where
+        F: FreeList<C>,
+    {
         let offset = addr.offset() - self.prev_sz;
 
-        test_println!("-> offset {:?}", offset);
+        test_println!("-> take: offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
             let slot = slab.get(offset)?;
-            let val = slot.remove_value(gen)?;
-            slot.set_next(local.head());
-            local.set_head(offset);
-            Some(val)
-        })
-    }
-
-    pub(crate) fn remove_remote(&self, addr: Addr<C>, gen: slot::Generation<C>) -> Option<T> {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref()?;
-            let slot = slab.get(offset)?;
-            let val = slot.remove_value(gen)?;
-            self.remote.push(offset, |next| slot.set_next(next));
-            Some(val)
+            slot.remove_value(gen, offset, free_list)
         })
     }
 
     pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
         let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
         slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
+    }
+
+    #[inline(always)]
+    pub(crate) fn free_list(&self) -> &impl FreeList<C> {
+        &self.remote
     }
 }
 

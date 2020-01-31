@@ -1,3 +1,4 @@
+use super::FreeList;
 use crate::sync::{
     atomic::{self, AtomicUsize, Ordering},
     CausalCell,
@@ -26,7 +27,6 @@ pub(crate) struct Generation<C = cfg::DefaultConfig> {
     value: usize,
     _cfg: PhantomData<fn(C)>,
 }
-
 struct LifecycleGen<C>(Generation<C>);
 
 #[repr(transparent)]
@@ -212,7 +212,12 @@ impl<T, C: cfg::Config> Slot<T, C> {
     }
 
     #[inline]
-    pub(super) fn remove(&self, gen: Generation<C>) -> bool {
+    pub(super) fn remove<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> bool {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut curr_gen;
 
@@ -265,11 +270,17 @@ impl<T, C: cfg::Config> Slot<T, C> {
 
         // Otherwise, we can remove the slot now!
         test_println!("-> remove deferred; can remove now");
-        self.remove_value(curr_gen).is_some()
+        let removed = self.remove_value(curr_gen, offset, free).is_some();
+        removed
     }
 
     #[inline]
-    pub(super) fn remove_value(&self, gen: Generation<C>) -> Option<T> {
+    pub(super) fn remove_value<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> Option<T> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut advanced = false;
         let next_gen = gen.advance();
@@ -305,7 +316,9 @@ impl<T, C: cfg::Config> Slot<T, C> {
                     test_println!("-> advanced gen; lifecycle={:#x}; refs={:?};", actual, refs);
                     if refs.value == 0 {
                         test_println!("-> ok to remove!");
-                        return self.item.with_mut(|item| unsafe { (*item).take() });
+                        let item = self.item.with_mut(|item| unsafe { (*item).take() });
+                        free.push(offset, self);
+                        return item;
                     }
 
                     // Otherwise, a reference must be dropped before we can
