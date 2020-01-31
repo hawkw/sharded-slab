@@ -482,3 +482,27 @@ fn custom_page_sz() {
         }
     });
 }
+
+#[test]
+fn free_list_is_used() {
+    struct TinyConfig;
+
+    impl crate::cfg::Config for TinyConfig {
+        const INITIAL_PAGE_SIZE: usize = 2;
+    }
+
+    run_model("free_list_is_used", || {
+        let slab = Slab::new_with_config::<TinyConfig>();
+
+        let t1 = slab.insert("hello").expect("insert");
+        let t2 = slab.insert("world").expect("insert");
+        assert_eq!(super::Shard::<&str, TinyConfig>::page_indices(t1).1, 0);
+        assert_eq!(super::Shard::<&str, TinyConfig>::page_indices(t2).1, 0);
+        let t3 = slab.insert("earth").expect("insert");
+        assert_eq!(super::Shard::<&str, TinyConfig>::page_indices(t3).1, 1);
+        slab.remove(t2);
+
+        let t4 = slab.insert("universe").expect("insert");
+        assert_eq!(super::Shard::<&str, TinyConfig>::page_indices(t4).1, 0);
+    });
+}

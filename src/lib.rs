@@ -177,8 +177,8 @@ macro_rules! thread_local {
 
 macro_rules! test_println {
     ($($arg:tt)*) => {
-        if cfg!(test) {
-            println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+        if cfg!(test) || cfg!(slab_print) {
+            eprintln!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
         }
     }
 }
@@ -505,7 +505,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     }
 
     #[inline(always)]
-    fn page_indices(idx: usize) -> (page::Addr<C>, usize) {
+    pub(crate) fn page_indices(idx: usize) -> (page::Addr<C>, usize) {
         let addr = C::unpack_addr(idx);
         (addr, addr.index())
     }
