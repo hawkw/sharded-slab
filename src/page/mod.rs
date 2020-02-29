@@ -64,11 +64,15 @@ pub(crate) type Iter<'a, T, C> =
     std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
 
 pub(crate) struct Local {
+    // index of the first slot on the local free list
     head: CausalCell<usize>,
 }
 
 pub(crate) struct Shared<T, C> {
     remote: stack::TransferStack<C>,
+    // tracks the size of the local free_list by keeping the index of the current position of the
+    // start of the local free list. If local.head() > size, it means that the local free_list if
+    // full.
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Slots<T, C>>>,

@@ -183,8 +183,10 @@ macro_rules! test_println {
     }
 }
 
+pub mod clear;
 pub mod implementation;
 mod page;
+pub mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -208,7 +210,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// While the guard exists, it indicates to the slab that the item the guard
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
-pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
+pub struct SlabGuard<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
@@ -233,7 +235,7 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
 //                      │XXXXXXXX│
 //                      └────────┘
 //                         ...
-struct Shard<T, C: cfg::Config> {
+pub(crate) struct Shard<T, C: cfg::Config> {
     /// The shard's parent thread ID.
     tid: usize,
     /// The local free list for each page.
@@ -426,18 +428,25 @@ impl<T, C: cfg::Config> Slab<T, C> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust
     /// let slab = sharded_slab::Slab::new();
     /// let key = slab.insert("hello world").unwrap();
     ///
     /// assert_eq!(slab.get(key).unwrap(), "hello world");
     /// assert!(slab.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<SlabGuard<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
-        self.shards.get(tid.as_usize())?.get(key)
+        let inner = self.shards.get(tid.as_usize())?.get(key)?;
+
+        Some(SlabGuard {
+            inner,
+            // Safe access as previous line checks for validity
+            shard: &self.shards[tid.as_usize()],
+            key,
+        })
     }
 
     /// Returns `true` if the slab contains a value for the given key.
@@ -492,7 +501,7 @@ unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 // === impl Shard ===
 
 impl<T, C: cfg::Config> Shard<T, C> {
-    fn new(tid: usize) -> Self {
+    pub(crate) fn new(tid: usize) -> Self {
         let mut total_sz = 0;
         let shared = (0..C::MAX_PAGES)
             .map(|page_num| {
@@ -506,7 +515,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         Self { tid, local, shared }
     }
 
-    fn insert(&self, value: T) -> Option<usize> {
+    pub(crate) fn insert(&self, value: T) -> Option<usize> {
         let mut value = Some(value);
 
         // Can we fit the value into an existing page?
@@ -524,7 +533,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     }
 
     #[inline(always)]
-    fn get(&self, idx: usize) -> Option<Guard<'_, T, C>> {
+    pub(crate) fn get(&self, idx: usize) -> Option<page::slot::Guard<'_, T, C>> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
@@ -533,15 +542,10 @@ impl<T, C: cfg::Config> Shard<T, C> {
             return None;
         }
 
-        let inner = self.shared[page_index].get(addr, idx)?;
-        Some(Guard {
-            inner,
-            shard: self,
-            key: idx,
-        })
+        self.shared[page_index].get(addr, idx)
     }
 
-    fn remove_local(&self, idx: usize) -> bool {
+    pub(crate) fn remove_local(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
@@ -552,7 +556,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
         self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
     }
 
-    fn remove_remote(&self, idx: usize) -> bool {
+    pub(crate) fn remove_remote(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
@@ -616,16 +620,16 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
     }
 }
 
-// === impl Guard ===
+// === impl SlabGuard ===
 
-impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> SlabGuard<'a, T, C> {
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
         self.key
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -633,7 +637,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, T, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
         if self.inner.release() {
@@ -647,7 +651,7 @@ impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C> fmt::Debug for Guard<'a, T, C>
+impl<'a, T, C> fmt::Debug for SlabGuard<'a, T, C>
 where
     T: fmt::Debug,
     C: cfg::Config,
@@ -657,7 +661,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for Guard<'a, T, C>
+impl<'a, T, C> PartialEq<T> for SlabGuard<'a, T, C>
 where
     T: PartialEq<T>,
     C: cfg::Config,
