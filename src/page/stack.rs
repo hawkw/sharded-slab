@@ -26,6 +26,9 @@ impl<C: cfg::Config> TransferStack<C> {
     }
 
     fn push(&self, new_head: usize, before: impl Fn(usize)) {
+        // We loop to win the race to set the new head. The `next` variable
+        // is the next slot on the stack which needs to be pointed to by the
+        // new head.
         let mut next = self.head.load(Ordering::Relaxed);
         loop {
             test_println!("-> next {:#x}", next);

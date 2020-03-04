@@ -156,8 +156,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
         let head = if head < self.size {
             head
         } else {
-            // if the local free list is empty, pop all the items on the remote
-            // free list onto the local free list.
+            // slow path: if the local free list is empty, pop all the items on
+            // the remote free list onto the local free list.
             let head = self.remote.pop_all();
 
             test_println!("-> remote head {:?}", head);

@@ -3,7 +3,7 @@ use crate::sync::{
     atomic::{self, AtomicUsize, Ordering},
     CausalCell,
 };
-use crate::{cfg, Pack, Tid};
+use crate::{cfg, clear::Clear, Pack, Tid};
 use std::{fmt, marker::PhantomData};
 
 pub(crate) struct Slot<T, C> {
@@ -73,6 +73,16 @@ impl<C: cfg::Config> Generation<C> {
             value,
             _cfg: PhantomData,
         }
+    }
+}
+
+impl<T, C> Slot<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    pub(super) fn get_used_slot(&self) -> Option<Generation<C>> {
+        None
     }
 }
 
@@ -153,29 +163,26 @@ impl<T, C: cfg::Config> Slot<T, C> {
         self.item.with(|item| unsafe { (&*item).as_ref() })
     }
 
-    #[inline]
-    pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
-        debug_assert!(self.is_empty(), "inserted into full slot");
-        debug_assert!(value.is_some(), "inserted twice");
-
+    /// Initilize a slot
+    ///
+    /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
+    /// only need to ensure that the `Slot` is in the right state, while when being used in a
+    /// `Slab` we want to insert a value into it, as the memory is not initlized
+    pub(super) fn initialize_state(&self) -> Option<Generation<C>> {
         // Load the current lifecycle state.
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
         let gen = LifecycleGen::from_packed(lifecycle).0;
         let refs = RefCount::<C>::from_packed(lifecycle);
 
         test_println!(
-            "-> insert; state={:?}; gen={:?}; refs={:?}",
+            "-> initialize; state={:?}; gen={:?}; refs={:?}",
             Lifecycle::<C>::from_packed(lifecycle),
             gen,
             refs
         );
 
-        // If a reference to the slot currently exists, we can't modify the
-        // value!
-        // TODO(eliza): is this a bug/should this just be an assertion rather
-        // than returning `None`?
         if refs.value != 0 {
-            test_println!("-> insert while referenced! cancelling");
+            test_println!("-> initialize while referenced! cancelling");
             return None;
         }
 
@@ -196,14 +203,29 @@ impl<T, C: cfg::Config> Slot<T, C> {
             return None;
         }
 
-        // Set the new value.
-        self.item.with_mut(|item| unsafe {
-            *item = value.take();
-        });
-
-        test_println!("-> inserted at {:?}", gen);
-
         Some(gen)
+    }
+
+    /// Insert a value into a slot
+    ///
+    /// We first initialize the state and then insert the pased in value into the slot.
+    #[inline]
+    pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
+        debug_assert!(self.is_empty(), "inserted into full slot");
+        debug_assert!(value.is_some(), "inserted twice");
+
+        if let Some(gen) = self.initialize_state() {
+            // Set the new value.
+            self.item.with_mut(|item| unsafe {
+                *item = value.take();
+            });
+
+            test_println!("-> inserted at {:?}", gen);
+
+            Some(gen)
+        } else {
+            None
+        }
     }
 
     #[inline(always)]

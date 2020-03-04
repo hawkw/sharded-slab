@@ -116,4 +116,15 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
             key,
         })
     }
+
+    pub fn remove(&self, key: usize) -> bool {
+        let tid = C::unpack_tid(key);
+
+        let shard = self.shards.get(tid.as_usize());
+        if tid.is_current() {
+            shard.map(|shard| shard.remove_local(key)).unwrap_or(false)
+        } else {
+            shard.map(|shard| shard.remove_remote(key)).unwrap_or(false)
+        }
+    }
 }
