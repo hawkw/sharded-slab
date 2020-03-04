@@ -1,4 +1,5 @@
 use crate::cfg::{self, CfgPrivate};
+use crate::clear::Clear;
 use crate::sync::CausalCell;
 use crate::Pack;
 
@@ -107,6 +108,52 @@ impl<C: cfg::Config> FreeList<C> for Local {
     }
 }
 
+impl<T, C> Shared<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Allocates storage for the page's slots.
+    #[cold]
+    fn allocate_default(&self) {
+        test_println!("-> alloc new page ({})", self.size);
+        debug_assert!(self.is_unallocated());
+
+        let mut slab = Vec::with_capacity(self.size);
+        slab.extend((1..self.size).map(Slot::new));
+        slab.push(Slot::default_new(Self::NULL));
+        self.slab.with_mut(|s| {
+            // this mut access is safe — it only occurs to initially
+            // allocate the page, which only happens on this thread; if the
+            // page has not yet been allocated, other threads will not try
+            // to access it yet.
+            unsafe {
+                *s = Some(slab.into_boxed_slice());
+            }
+        });
+    }
+
+    #[inline]
+    pub(crate) fn get_used_slot(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
+        let head = self.get_head(local)?;
+
+        // do we need to allocate storage for this page?
+        if self.is_unallocated() {
+            self.allocate_default();
+        }
+
+        self.initialize_new_slot(head, |slab| {
+            let slab = unsafe { &*(slab) }
+                .as_ref()
+                .expect("page must have been allocated to insert!");
+            let slot = &slab[head];
+            let gen = slot.initialize_state();
+            local.set_head(slot.next());
+            gen
+        })
+    }
+}
+
 impl<T, C: cfg::Config> Shared<T, C> {
     const NULL: usize = Addr::<C>::NULL;
 
@@ -124,6 +171,59 @@ impl<T, C: cfg::Config> Shared<T, C> {
     #[inline]
     fn is_unallocated(&self) -> bool {
         self.slab.with(|s| unsafe { (*s).is_none() })
+    }
+
+    /// Return the head of the freelist
+    ///
+    /// If there is space on the local list, it returns the head of the local list. Otherwise, it
+    /// pops all the slots from the global list and returns the head of that list
+    ///
+    /// *Note*: The local list's head is reset when setting the new state in the slot pointed to be
+    /// `head` returned from this function
+    #[inline]
+    fn get_head(&self, local: &Local) -> Option<usize> {
+        let head = local.head();
+
+        test_println!("-> local head {:?}", head);
+
+        // are there any items on the local free list? (fast path)
+        let head = if head < self.size {
+            head
+        } else {
+            // slow path: if the local free list is empty, pop all the items on
+            // the remote free list.
+            let head = self.remote.pop_all();
+
+            test_println!("-> remote head {:?}", head);
+            head?
+        };
+
+        // if the head is still null, both the local and remote free lists are
+        // empty --- we can't fit any more items on this page.
+        if head == Self::NULL {
+            test_println!("-> NULL! {:?}", head);
+            None
+        } else {
+            Some(head)
+        }
+    }
+
+    /// Initilizes the state of the new slot.
+    ///
+    /// It does this via the provided initilizatin function `func`. Once it get's the generation
+    /// number for the new slot, it performs the operations required to return the key to the
+    /// caller.
+    #[inline]
+    fn initialize_new_slot<F>(&self, head: usize, func: F) -> Option<usize>
+    where
+        F: FnOnce(*const Option<Slots<T, C>>) -> Option<slot::Generation<C>>,
+    {
+        let gen = self.slab.with(func)?;
+
+        let index = head + self.prev_sz;
+
+        test_println!("insert at offset: {}", index);
+        Some(gen.pack(index))
     }
 
     /// Allocates storage for the page's slots.
@@ -148,35 +248,14 @@ impl<T, C: cfg::Config> Shared<T, C> {
 
     #[inline]
     pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
-        let head = local.head();
-
-        test_println!("-> local head {:?}", head);
-
-        // are there any items on the local free list? (fast path)
-        let head = if head < self.size {
-            head
-        } else {
-            // slow path: if the local free list is empty, pop all the items on
-            // the remote free list onto the local free list.
-            let head = self.remote.pop_all();
-
-            test_println!("-> remote head {:?}", head);
-            head?
-        };
-
-        // if the head is still null, both the local and remote free lists are
-        // empty --- we can't fit any more items on this page.
-        if head == Self::NULL {
-            test_println!("-> NULL! {:?}", head);
-            return None;
-        }
+        let head = self.get_head(local)?;
 
         // do we need to allocate storage for this page?
         if self.is_unallocated() {
             self.allocate();
         }
 
-        let gen = self.slab.with(|slab| {
+        self.initialize_new_slot(head, |slab| {
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");
@@ -184,12 +263,7 @@ impl<T, C: cfg::Config> Shared<T, C> {
             let gen = slot.insert(t);
             local.set_head(slot.next());
             gen
-        })?;
-
-        let index = head + self.prev_sz;
-
-        test_println!("insert at offset: {}", index);
-        Some(gen.pack(index))
+        })
     }
 
     #[inline]

@@ -81,8 +81,13 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(super) fn get_used_slot(&self) -> Option<Generation<C>> {
-        None
+    pub(super) fn default_new(next: usize) -> Self {
+        Self {
+            lifecycle: AtomicUsize::new(0),
+            item: CausalCell::new(Some(T::default())),
+            next: CausalCell::new(next),
+            _cfg: PhantomData,
+        }
     }
 }
 
