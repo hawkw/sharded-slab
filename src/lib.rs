@@ -500,6 +500,26 @@ unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
 // === impl Shard ===
 
+impl<T, C> Shard<T, C>
+where
+    T: clear::Clear + Default,
+    C: cfg::Config,
+{
+    pub(crate) fn get_initialized_slot(&self) -> Option<usize> {
+        for (page_idx, page) in self.shared.iter().enumerate() {
+            let local = self.local(page_idx);
+
+            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
+
+            if let offset @ Some(_) = page.get_initialized_slot(local) {
+                return offset;
+            }
+        }
+
+        None
+    }
+}
+
 impl<T, C: cfg::Config> Shard<T, C> {
     pub(crate) fn new(tid: usize) -> Self {
         let mut total_sz = 0;

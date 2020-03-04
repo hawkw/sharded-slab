@@ -134,7 +134,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn get_used_slot(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
+    pub(crate) fn get_initialized_slot(&self, local: &Local) -> Option<usize> {
         let head = self.get_head(local)?;
 
         // do we need to allocate storage for this page?

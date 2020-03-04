@@ -8,12 +8,19 @@ use crate::{
 
 use std::marker::PhantomData;
 
-pub struct Pool<T: Clear + Default, C: cfg::Config = DefaultConfig> {
+pub struct Pool<T, C = DefaultConfig>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
     shards: Box<[Shard<T, C>]>,
     _cfg: PhantomData<C>,
 }
 
-impl<T: Clear + Default> Pool<T> {
+impl<T> Pool<T>
+where
+    T: Clear + Default,
+{
     pub fn new() -> Self {
         Self::new_with_config()
     }
@@ -72,9 +79,8 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
     pub fn create(&self) -> Option<usize> {
         let tid = Tid::<C>::current();
         test_println!("pool: create {:?}", tid);
-        let value = T::default();
         self.shards[tid.as_usize()]
-            .insert(value)
+            .get_initialized_slot()
             .map(|idx| tid.pack(idx))
     }
 
