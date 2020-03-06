@@ -40,7 +40,7 @@ impl<C: cfg::Config> Addr<C> {
 }
 
 pub(crate) trait FreeList<C> {
-    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>);
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>) where C: cfg::Config;
 }
 
 impl<C: cfg::Config> Pack<C> for Addr<C> {
@@ -102,7 +102,10 @@ impl Local {
 }
 
 impl<C: cfg::Config> FreeList<C> for Local {
-    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>) {
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>)
+    where
+        T: Default,
+    {
         slot.set_next(self.head());
         self.set_head(new_head);
     }
@@ -121,7 +124,7 @@ where
 
         let mut slab = Vec::with_capacity(self.size);
         slab.extend((1..self.size).map(Slot::new));
-        slab.push(Slot::default_new(Self::NULL));
+        slab.push(Slot::new(Self::NULL));
         self.slab.with_mut(|s| {
             // this mut access is safe — it only occurs to initially
             // allocate the page, which only happens on this thread; if the
@@ -154,7 +157,11 @@ where
     }
 }
 
-impl<T, C: cfg::Config> Shared<T, C> {
+impl<T, C> Shared<T, C>
+where
+    T: Default,
+    C: cfg::Config,
+{
     const NULL: usize = Addr::<C>::NULL;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
@@ -293,7 +300,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.remove(gen, offset, free_list)
+                slot.remove(gen, offset, free_list);
+                true
             } else {
                 false
             }

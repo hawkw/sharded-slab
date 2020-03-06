@@ -84,18 +84,6 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
             .map(|idx| tid.pack(idx))
     }
 
-    pub fn create_with<F>(&self, fun: F) -> Option<usize>
-    where
-        F: FnOnce() -> T,
-    {
-        let tid = Tid::<C>::current();
-        test_println!("pool: create {:?}", tid);
-        let value = fun();
-        self.shards[tid.as_usize()]
-            .insert(value)
-            .map(|idx| tid.pack(idx))
-    }
-
     /// Return a reference to the value associated with the given key.
     ///
     /// If the slab does not contain a value for the given key, `None` is returned instead.
