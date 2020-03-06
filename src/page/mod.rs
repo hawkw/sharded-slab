@@ -40,7 +40,9 @@ impl<C: cfg::Config> Addr<C> {
 }
 
 pub(crate) trait FreeList<C> {
-    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>) where C: cfg::Config;
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>)
+    where
+        C: cfg::Config;
 }
 
 impl<C: cfg::Config> Pack<C> for Addr<C> {

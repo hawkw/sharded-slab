@@ -76,79 +76,26 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
-impl<T, C> Slot<Option<T>, C>
-where
-    C: cfg::Config,
-{
-    fn is_empty(&self) -> bool {
-        self.item.with(|item| unsafe { (*item).is_none() })
-    }
-
-    /// Insert a value into a slot
-    ///
-    /// We first initialize the state and then insert the pased in value into the slot.
-    #[inline]
-    pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
-        debug_assert!(self.is_empty(), "inserted into full slot");
-        debug_assert!(value.is_some(), "inserted twice");
-
-        if let Some(gen) = self.initialize_state() {
-            // Set the new value.
-            self.item.with_mut(|item| unsafe {
-                *item = value.take();
-            });
-
-            test_println!("-> inserted at {:?}", gen);
-
-            Some(gen)
-        } else {
-            None
-        }
-    }
-
-    /// Tries to remove the value in the slot
-    ///
-    /// This method tries to remove the value in the slot. If there are existing references, then
-    /// the slot is marked for removal and the next thread calling either this method or
-    /// `remove_value` will do the work instead.
-    #[inline]
-    pub(super) fn try_remove_value<F: FreeList<C>>(
-        &self,
-        gen: Generation<C>,
-        offset: usize,
-        free: &F,
-    ) -> Option<T> {
-        if self.mark_for_mutation(gen) {
-            None
-        } else {
-            // Otherwise, we can remove the slot now!
-            test_println!("-> remove deferred; can remove now");
-            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
-                (*item).take()
-            })?
-        }
-    }
-
-    #[inline]
-    pub(super) fn remove_value<F: FreeList<C>>(&self, gen: Generation<C>, offset: usize, free: &F) -> Option<T> {
-        self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
-            (*item).take()
-        })?
-    }
-}
-
+// Slot methods which should work across all trait bounds
 impl<T, C> Slot<T, C>
 where
-    T: Default + Clear,
     C: cfg::Config,
 {
-    pub(in crate::page) fn new(next: usize) -> Self {
-        Self {
-            lifecycle: AtomicUsize::new(0),
-            item: CausalCell::new(T::default()),
-            next: CausalCell::new(next),
-            _cfg: PhantomData,
-        }
+    #[inline(always)]
+    pub(super) fn next(&self) -> usize {
+        self.next.with(|next| unsafe { *next })
+    }
+
+    #[inline(always)]
+    pub(super) fn value(&self) -> Option<&T> {
+        self.item.with(|item| unsafe { Some(&*item) })
+    }
+
+    #[inline(always)]
+    pub(super) fn set_next(&self, next: usize) {
+        self.next.with_mut(|n| unsafe {
+            (*n) = next;
+        })
     }
 
     #[inline(always)]
@@ -213,59 +160,6 @@ where
         }
     }
 
-    #[inline(always)]
-    pub(super) fn value(&self) -> Option<&T> {
-        self.item.with(|item| unsafe { Some(&*item)})
-    }
-
-    /// Initilize a slot
-    ///
-    /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
-    /// only need to ensure that the `Slot` is in the right state, while when being used in a
-    /// `Slab` we want to insert a value into it, as the memory is not initialized
-    pub(super) fn initialize_state(&self) -> Option<Generation<C>> {
-        // Load the current lifecycle state.
-        let lifecycle = self.lifecycle.load(Ordering::Acquire);
-        let gen = LifecycleGen::from_packed(lifecycle).0;
-        let refs = RefCount::<C>::from_packed(lifecycle);
-
-        test_println!(
-            "-> initialize; state={:?}; gen={:?}; refs={:?}",
-            Lifecycle::<C>::from_packed(lifecycle),
-            gen,
-            refs
-        );
-
-        if refs.value != 0 {
-            test_println!("-> initialize while referenced! cancelling");
-            return None;
-        }
-
-        // Set the slot's state to NOT_REMOVED.
-        let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(0));
-        let actual = self
-            .lifecycle
-            .compare_and_swap(lifecycle, new_lifecycle, Ordering::AcqRel);
-        if actual != lifecycle {
-            // The slot was modified while we were inserting to it! It's no
-            // longer safe to insert a new value.
-            test_println!(
-                "-> modified during insert, cancelling! new={:#x}; expected={:#x}; actual={:#x};",
-                new_lifecycle,
-                lifecycle,
-                actual
-            );
-            return None;
-        }
-
-        Some(gen)
-    }
-
-    #[inline(always)]
-    pub(super) fn next(&self) -> usize {
-        self.next.with(|next| unsafe { *next })
-    }
-
     /// Marks this slot for mutation
     ///
     /// This method checks if there are any references to this slot. If there _are_ valid
@@ -325,28 +219,9 @@ where
         }
     }
 
-    /// Clears the storage for this `Slot`
-    /// 
+    /// Mutates this slot.
     ///
-    #[inline]
-    pub(super) fn clear_storage<F: FreeList<C>>(
-        &self,
-        gen: Generation<C>,
-        offset: usize,
-        free: &F,
-    ) -> bool {
-        if self.mark_for_mutation(gen) {
-            false
-        } else {
-            // Otherwise, we can remove the slot now!
-            test_println!("-> remove deferred; can remove now");
-            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
-                (*item).clear()
-            })
-            .is_some()
-        }
-    }
-
+    /// This method spins until no references to this slot are left, and calls the mutator
     fn mutate_storage_with_confirmation<F, M, R>(
         &self,
         gen: Generation<C>,
@@ -411,13 +286,161 @@ where
         }
     }
 
-    #[inline(always)]
-    pub(super) fn set_next(&self, next: usize) {
-        self.next.with_mut(|n| unsafe {
-            (*n) = next;
-        })
+    /// Initilize a slot
+    ///
+    /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
+    /// only need to ensure that the `Slot` is in the right state, while when being used in a
+    /// `Slab` we want to insert a value into it, as the memory is not initialized
+    pub(super) fn initialize_state(&self) -> Option<Generation<C>> {
+        // Load the current lifecycle state.
+        let lifecycle = self.lifecycle.load(Ordering::Acquire);
+        let gen = LifecycleGen::from_packed(lifecycle).0;
+        let refs = RefCount::<C>::from_packed(lifecycle);
+
+        test_println!(
+            "-> initialize; state={:?}; gen={:?}; refs={:?}",
+            Lifecycle::<C>::from_packed(lifecycle),
+            gen,
+            refs
+        );
+
+        if refs.value != 0 {
+            test_println!("-> initialize while referenced! cancelling");
+            return None;
+        }
+
+        // Set the slot's state to NOT_REMOVED.
+        let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(0));
+        let actual = self
+            .lifecycle
+            .compare_and_swap(lifecycle, new_lifecycle, Ordering::AcqRel);
+        if actual != lifecycle {
+            // The slot was modified while we were inserting to it! It's no
+            // longer safe to insert a new value.
+            test_println!(
+                "-> modified during insert, cancelling! new={:#x}; expected={:#x}; actual={:#x};",
+                new_lifecycle,
+                lifecycle,
+                actual
+            );
+            return None;
+        }
+
+        Some(gen)
+    }
+}
+
+// Slot impl which _needs_ an `Option` for self.item, this is for `Slab` to use.
+impl<T, C> Slot<Option<T>, C>
+where
+    C: cfg::Config,
+{
+    fn is_empty(&self) -> bool {
+        self.item.with(|item| unsafe { (*item).is_none() })
     }
 
+    /// Insert a value into a slot
+    ///
+    /// We first initialize the state and then insert the pased in value into the slot.
+    #[inline]
+    pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
+        debug_assert!(self.is_empty(), "inserted into full slot");
+        debug_assert!(value.is_some(), "inserted twice");
+
+        let gen = self.initialize_state()?;
+        // Set the new value.
+        self.item.with_mut(|item| unsafe {
+            *item = value.take();
+        });
+
+        test_println!("-> inserted at {:?}", gen);
+
+        Some(gen)
+    }
+
+    /// Tries to remove the value in the slot
+    ///
+    /// This method tries to remove the value in the slot. If there are existing references, then
+    /// the slot is marked for removal and the next thread calling either this method or
+    /// `remove_value` will do the work instead.
+    #[inline]
+    pub(super) fn try_remove_value<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> Option<T> {
+        if self.mark_for_mutation(gen) {
+            None
+        } else {
+            // Otherwise, we can remove the slot now!
+            test_println!("-> remove deferred; can remove now");
+            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
+                (*item).take()
+            })?
+        }
+    }
+
+    #[inline]
+    pub(super) fn remove_value<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> Option<T> {
+        self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe { (*item).take() })?
+    }
+}
+
+impl<T, C> Slot<T, C>
+where
+    T: Default + Clear,
+    C: cfg::Config,
+{
+    pub(in crate::page) fn new(next: usize) -> Self {
+        Self {
+            lifecycle: AtomicUsize::new(0),
+            item: CausalCell::new(T::default()),
+            next: CausalCell::new(next),
+            _cfg: PhantomData,
+        }
+    }
+
+    /// Try to clear this slot's storage
+    ///
+    /// If there are references to this slot, then we mark this slot for clearing and let the last
+    /// thread do the work for us.
+    #[inline]
+    pub(super) fn try_clear_storage<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> bool {
+        if self.mark_for_mutation(gen) {
+            false
+        } else {
+            // Otherwise, we can remove the slot now!
+            test_println!("-> remove deferred; can remove now");
+            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
+                (*item).clear()
+            })
+            .is_some()
+        }
+    }
+
+    /// Clear this slot's storage
+    ///
+    /// This method blocks until all references have been dropped and clears the storage.
+    pub(super) fn clear_storage<F: FreeList<C>>(
+        &self,
+        gen: Generation<C>,
+        offset: usize,
+        free: &F,
+    ) -> bool {
+        self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe { (*item).clear() })
+            .is_some()
+    }
 }
 
 impl<T, C: cfg::Config> fmt::Debug for Slot<T, C> {
