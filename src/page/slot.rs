@@ -222,16 +222,10 @@ where
     /// Mutates this slot.
     ///
     /// This method spins until no references to this slot are left, and calls the mutator
-    fn release_with<F, M, R>(
-        &self,
-        gen: Generation<C>,
-        offset: usize,
-        free: &F,
-        mutator: M,
-    ) -> R
+    fn release_with<F, M, R>(&self, gen: Generation<C>, offset: usize, free: &F, mutator: M) -> R
     where
         F: FreeList<C>,
-        M: FnOnce(&mut T) -> R,
+        M: FnOnce(Option<&mut T>) -> R,
     {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut advanced = false;
@@ -250,7 +244,7 @@ where
             // already stored the new generation.
             if (!advanced) && gen != current_gen {
                 test_println!("-> already removed!");
-                return;
+                return mutator(None);
             }
             match self.lifecycle.compare_exchange(
                 lifecycle,
@@ -268,7 +262,9 @@ where
                     test_println!("-> advanced gen; lifecycle={:#x}; refs={:?};", actual, refs);
                     if refs.value == 0 {
                         test_println!("-> ok to remove!");
-                        let value = self.item.with_mut(|item| mutator(unsafe { &mut *item }));
+                        let value = self
+                            .item
+                            .with_mut(|item| mutator(Some(unsafe { &mut *item })));
                         free.push(offset, self);
                         return value;
                     }
@@ -386,7 +382,7 @@ where
         offset: usize,
         free: &F,
     ) -> Option<T> {
-        self.release_with(gen, offset, free, |item| item.take())?
+        self.release_with(gen, offset, free, |item| item.and_then(|inner| inner.take()))
     }
 }
 
@@ -436,7 +432,11 @@ where
     ) -> bool {
         // release_with will _always_ wait unitl it can release the slot or just return if the slot
         // has already been released.
-        self.release_with(gen, offset, free, |item| item.clear());
+        self.release_with(gen, offset, free, |item| {
+            // Only call clear if this slot actually had some value stored. If it's already been
+            // deleted, do nothing
+            item.and_then(|inner| Some(Clear::clear(inner)))
+        });
         true
     }
 }

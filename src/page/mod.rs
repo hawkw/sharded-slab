@@ -112,53 +112,6 @@ impl<C: cfg::Config> FreeList<C> for Local {
 
 impl<T, C> Shared<T, C>
 where
-    T: Clear + Default,
-    C: cfg::Config,
-{
-    /// Allocates storage for the page's slots.
-    #[cold]
-    fn allocate_default(&self) {
-        test_println!("-> alloc new page ({})", self.size);
-        debug_assert!(self.is_unallocated());
-
-        let mut slab = Vec::with_capacity(self.size);
-        slab.extend((1..self.size).map(Slot::new));
-        slab.push(Slot::new(Self::NULL));
-        self.slab.with_mut(|s| {
-            // this mut access is safe — it only occurs to initially
-            // allocate the page, which only happens on this thread; if the
-            // page has not yet been allocated, other threads will not try
-            // to access it yet.
-            unsafe {
-                *s = Some(slab.into_boxed_slice());
-            }
-        });
-    }
-
-    #[inline]
-    pub(crate) fn get_initialized_slot(&self, local: &Local) -> Option<usize> {
-        let head = self.get_head(local)?;
-
-        // do we need to allocate storage for this page?
-        if self.is_unallocated() {
-            self.allocate_default();
-        }
-
-        self.initialize_new_slot(head, |slab| {
-            let slab = unsafe { &*(slab) }
-                .as_ref()
-                .expect("page must have been allocated to insert!");
-            let slot = &slab[head];
-            let gen = slot.initialize_state();
-            local.set_head(slot.next());
-            gen
-        })
-    }
-}
-
-impl<T, C> Shared<T, C>
-where
-    T: Default,
     C: cfg::Config,
 {
     const NULL: usize = Addr::<C>::NULL;
@@ -170,13 +123,6 @@ where
             remote: stack::TransferStack::new(),
             slab: CausalCell::new(None),
         }
-    }
-
-    /// Returns `true` if storage is currently allocated for this page, `false`
-    /// otherwise.
-    #[inline]
-    fn is_unallocated(&self) -> bool {
-        self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
     /// Return the head of the freelist
@@ -214,22 +160,11 @@ where
         }
     }
 
-    /// Initilizes the state of the new slot.
-    ///
-    /// It does this via the provided initilizatin function `func`. Once it get's the generation
-    /// number for the new slot, it performs the operations required to return the key to the
-    /// caller.
+    /// Returns `true` if storage is currently allocated for this page, `false`
+    /// otherwise.
     #[inline]
-    fn initialize_new_slot<F>(&self, head: usize, func: F) -> Option<usize>
-    where
-        F: FnOnce(*const Option<Slots<T, C>>) -> Option<slot::Generation<C>>,
-    {
-        let gen = self.slab.with(func)?;
-
-        let index = head + self.prev_sz;
-
-        test_println!("insert at offset: {}", index);
-        Some(gen.pack(index))
+    fn is_unallocated(&self) -> bool {
+        self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
     /// Allocates storage for the page's slots.
@@ -252,6 +187,53 @@ where
         });
     }
 
+    /// Initilizes the state of the new slot.
+    ///
+    /// It does this via the provided initilizatin function `func`. Once it get's the generation
+    /// number for the new slot, it performs the operations required to return the key to the
+    /// caller.
+    #[inline]
+    fn initialize_new_slot<F>(&self, head: usize, func: F) -> Option<usize>
+    where
+        F: FnOnce(*const Option<Slots<T, C>>) -> Option<slot::Generation<C>>,
+    {
+        let gen = self.slab.with(func)?;
+
+        let index = head + self.prev_sz;
+
+        test_println!("insert at offset: {}", index);
+        Some(gen.pack(index))
+    }
+
+    #[inline]
+    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
+        let poff = addr.offset() - self.prev_sz;
+
+        test_println!("-> offset {:?}", poff);
+
+        self.slab.with(|slab| {
+            unsafe { &*slab }
+                .as_ref()?
+                .get(poff)?
+                .get(C::unpack_gen(idx))
+        })
+    }
+
+    #[inline(always)]
+    pub(crate) fn free_list(&self) -> &impl FreeList<C> {
+        &self.remote
+    }
+
+    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
+    }
+}
+
+impl<T, C> Shard<Option<T>, C>
+where
+    C: cfg::Config,
+{
     #[inline]
     pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
         let head = self.get_head(local)?;
@@ -271,39 +253,30 @@ where
             gen
         })
     }
+}
 
+impl<T, C> Shared<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
-        let poff = addr.offset() - self.prev_sz;
+    pub(crate) fn get_initialized_slot(&self, local: &Local) -> Option<usize> {
+        let head = self.get_head(local)?;
 
-        test_println!("-> offset {:?}", poff);
+        // do we need to allocate storage for this page?
+        if self.is_unallocated() {
+            self.allocate();
+        }
 
-        self.slab.with(|slab| {
-            unsafe { &*slab }
-                .as_ref()?
-                .get(poff)?
-                .get(C::unpack_gen(idx))
-        })
-    }
-
-    pub(crate) fn remove<F: FreeList<C>>(
-        &self,
-        addr: Addr<C>,
-        gen: slot::Generation<C>,
-        free_list: &F,
-    ) -> bool {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref();
-            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.remove(gen, offset, free_list);
-                true
-            } else {
-                false
-            }
+        self.initialize_new_slot(head, |slab| {
+            let slab = unsafe { &*(slab) }
+                .as_ref()
+                .expect("page must have been allocated to insert!");
+            let slot = &slab[head];
+            let gen = slot.initialize_state();
+            local.set_head(slot.next());
+            gen
         })
     }
 
@@ -326,15 +299,32 @@ where
             slot.remove_value(gen, offset, free_list)
         })
     }
+}
 
-    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
-        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
-        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
-    }
+impl<T, C> Shared<T, C>
+where
+    T: Default,
+    C: cfg::Config,
+{
+    pub(crate) fn remove<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
+        let offset = addr.offset() - self.prev_sz;
 
-    #[inline(always)]
-    pub(crate) fn free_list(&self) -> &impl FreeList<C> {
-        &self.remote
+        test_println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.remove(gen, offset, free_list);
+                true
+            } else {
+                false
+            }
+        })
     }
 }
 
