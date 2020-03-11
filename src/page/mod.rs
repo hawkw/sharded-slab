@@ -104,10 +104,7 @@ impl Local {
 }
 
 impl<C: cfg::Config> FreeList<C> for Local {
-    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>)
-    where
-        T: Default,
-    {
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>) {
         slot.set_next(self.head());
         self.set_head(new_head);
     }

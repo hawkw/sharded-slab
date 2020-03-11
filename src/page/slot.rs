@@ -87,8 +87,8 @@ where
     }
 
     #[inline(always)]
-    pub(super) fn value(&self) -> Option<&T> {
-        self.item.with(|item| unsafe { Some(&*item) })
+    pub(super) fn value(&self) -> &T {
+        self.item.with(|item| unsafe { &*item })
     }
 
     #[inline(always)]
@@ -136,7 +136,7 @@ where
                 Ok(_) => {
                     // Okay, the ref count was incremented successfully! We can
                     // now return a guard!
-                    let item = self.value()?;
+                    let item = self.value();
 
                     test_println!("-> {:?}", new_refs);
 
@@ -165,7 +165,7 @@ where
     /// This method checks if there are any references to this slot. If there _are_ valid
     /// references, it just marks them for modification and returns and the next thread calling
     /// either `clear_storage` or `remove_value` will try and modify the storage
-    fn mark_for_mutation(&self, gen: Generation<C>) -> bool {
+    fn mark_release(&self, gen: Generation<C>) -> bool {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut curr_gen;
 
@@ -174,7 +174,7 @@ where
         loop {
             curr_gen = LifecycleGen::from_packed(lifecycle).0;
             test_println!(
-                "-> remove deferred; gen={:?}; current_gen={:?};",
+                "-> mark_release; gen={:?}; current_gen={:?};",
                 gen,
                 curr_gen
             );
@@ -187,7 +187,7 @@ where
             // Set the new state to `MARKED`.
             let new_lifecycle = Lifecycle::<C>::MARKED.pack(lifecycle);
             test_println!(
-                "-> remove deferred; old_lifecycle={:#x}; new_lifecycle={:#x};",
+                "-> mark_release; old_lifecycle={:#x}; new_lifecycle={:#x};",
                 lifecycle,
                 new_lifecycle
             );
@@ -200,7 +200,7 @@ where
             ) {
                 Ok(_) => break,
                 Err(actual) => {
-                    test_println!("-> remove deferred; retrying");
+                    test_println!("-> mark_release; retrying");
                     lifecycle = actual;
                 }
             }
@@ -208,12 +208,12 @@ where
 
         // Unpack the current reference count to see if we can remove the slot now.
         let refs = RefCount::<C>::from_packed(lifecycle);
-        test_println!("-> remove_deferred: marked; refs={:?};", refs);
+        test_println!("-> mark_release: marked; refs={:?};", refs);
 
         // Are there currently outstanding references to the slot? If so, it
         // will have to be removed when those references are dropped.
         if refs.value > 0 {
-            return true;
+            true
         } else {
             false
         }
@@ -222,23 +222,23 @@ where
     /// Mutates this slot.
     ///
     /// This method spins until no references to this slot are left, and calls the mutator
-    fn mutate_storage_with_confirmation<F, M, R>(
+    fn release_with<F, M, R>(
         &self,
         gen: Generation<C>,
         offset: usize,
         free: &F,
         mutator: M,
-    ) -> Option<R>
+    ) -> R
     where
         F: FreeList<C>,
-        M: FnOnce(*mut T) -> R,
+        M: FnOnce(&mut T) -> R,
     {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut advanced = false;
         let next_gen = gen.advance();
         loop {
             let current_gen = Generation::from_packed(lifecycle);
-            test_println!("-> remove_inner; lifecycle={:#x}; expected_gen={:?}; current_gen={:?}; next_gen={:?};",
+            test_println!("-> release_with; lifecycle={:#x}; expected_gen={:?}; current_gen={:?}; next_gen={:?};",
                 lifecycle,
                 gen,
                 current_gen,
@@ -250,7 +250,7 @@ where
             // already stored the new generation.
             if (!advanced) && gen != current_gen {
                 test_println!("-> already removed!");
-                return None;
+                return;
             }
             match self.lifecycle.compare_exchange(
                 lifecycle,
@@ -268,9 +268,9 @@ where
                     test_println!("-> advanced gen; lifecycle={:#x}; refs={:?};", actual, refs);
                     if refs.value == 0 {
                         test_println!("-> ok to remove!");
-                        let value = self.item.with_mut(|item| mutator(item));
+                        let value = self.item.with_mut(|item| mutator(unsafe { &mut *item }));
                         free.push(offset, self);
-                        return Some(value);
+                        return value;
                     }
 
                     // Otherwise, a reference must be dropped before we can
@@ -298,7 +298,7 @@ where
         let refs = RefCount::<C>::from_packed(lifecycle);
 
         test_println!(
-            "-> initialize; state={:?}; gen={:?}; refs={:?}",
+            "-> initialize_state; state={:?}; gen={:?}; refs={:?}",
             Lifecycle::<C>::from_packed(lifecycle),
             gen,
             refs
@@ -370,14 +370,12 @@ where
         offset: usize,
         free: &F,
     ) -> Option<T> {
-        if self.mark_for_mutation(gen) {
+        if self.mark_release(gen) {
             None
         } else {
             // Otherwise, we can remove the slot now!
-            test_println!("-> remove deferred; can remove now");
-            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
-                (*item).take()
-            })?
+            test_println!("-> try_remove_value; can remove now");
+            self.remove_value(gen, offset, free)
         }
     }
 
@@ -388,10 +386,11 @@ where
         offset: usize,
         free: &F,
     ) -> Option<T> {
-        self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe { (*item).take() })?
+        self.release_with(gen, offset, free, |item| item.take())?
     }
 }
 
+// These impls are specific to `Pool`
 impl<T, C> Slot<T, C>
 where
     T: Default + Clear,
@@ -417,15 +416,12 @@ where
         offset: usize,
         free: &F,
     ) -> bool {
-        if self.mark_for_mutation(gen) {
+        if self.mark_release(gen) {
             false
         } else {
             // Otherwise, we can remove the slot now!
-            test_println!("-> remove deferred; can remove now");
-            self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe {
-                (*item).clear()
-            })
-            .is_some()
+            test_println!("-> try_clear_storage; can remove now");
+            self.clear_storage(gen, offset, free)
         }
     }
 
@@ -438,8 +434,10 @@ where
         offset: usize,
         free: &F,
     ) -> bool {
-        self.mutate_storage_with_confirmation(gen, offset, free, |item| unsafe { (*item).clear() })
-            .is_some()
+        // release_with will _always_ wait unitl it can release the slot or just return if the slot
+        // has already been released.
+        self.release_with(gen, offset, free, |item| item.clear());
+        true
     }
 }
 
