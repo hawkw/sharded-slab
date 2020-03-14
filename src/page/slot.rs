@@ -262,6 +262,9 @@ where
                     test_println!("-> advanced gen; lifecycle={:#x}; refs={:?};", actual, refs);
                     if refs.value == 0 {
                         test_println!("-> ok to remove!");
+                        // safety: we've modified the generation of this slot and any other thread
+                        // calling this method will exit out at the generation check above in the
+                        // next iteraton of the loop.
                         let value = self
                             .item
                             .with_mut(|item| mutator(Some(unsafe { &mut *item })));

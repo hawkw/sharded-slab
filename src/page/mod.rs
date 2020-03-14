@@ -167,26 +167,6 @@ where
         self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
-    /// Allocates storage for the page's slots.
-    #[cold]
-    fn allocate(&self) {
-        test_println!("-> alloc new page ({})", self.size);
-        debug_assert!(self.is_unallocated());
-
-        let mut slab = Vec::with_capacity(self.size);
-        slab.extend((1..self.size).map(Slot::new));
-        slab.push(Slot::new(Self::NULL));
-        self.slab.with_mut(|s| {
-            // this mut access is safe — it only occurs to initially
-            // allocate the page, which only happens on this thread; if the
-            // page has not yet been allocated, other threads will not try
-            // to access it yet.
-            unsafe {
-                *s = Some(slab.into_boxed_slice());
-            }
-        });
-    }
-
     /// Initilizes the state of the new slot.
     ///
     /// It does this via the provided initilizatin function `func`. Once it get's the generation
@@ -224,13 +204,9 @@ where
         &self.remote
     }
 
-    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
-        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
-        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
-    }
 }
 
-impl<T, C> Shard<Option<T>, C>
+impl<T, C> Shared<Option<T>, C>
 where
     C: cfg::Config,
 {
@@ -252,6 +228,52 @@ where
             local.set_head(slot.next());
             gen
         })
+    }
+
+    pub(crate) fn take<F>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> Option<T>
+    where
+        F: FreeList<C>,
+    {
+        let offset = addr.offset() - self.prev_sz;
+
+        test_println!("-> take: offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref()?;
+            let slot = slab.get(offset)?;
+            slot.remove_value(gen, offset, free_list)
+        })
+    }
+
+    pub(crate) fn remove<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
+        let offset = addr.offset() - self.prev_sz;
+
+        test_println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.try_remove_value(gen, offset, free_list);
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
     }
 }
 
@@ -280,12 +302,32 @@ where
         })
     }
 
-    pub(crate) fn take<F>(
+    /// Allocates storage for the page's slots.
+    #[cold]
+    fn allocate(&self) {
+        test_println!("-> alloc new page ({})", self.size);
+        debug_assert!(self.is_unallocated());
+
+        let mut slab = Vec::with_capacity(self.size);
+        slab.extend((1..self.size).map(Slot::new));
+        slab.push(Slot::new(Self::NULL));
+        self.slab.with_mut(|s| {
+            // this mut access is safe — it only occurs to initially
+            // allocate the page, which only happens on this thread; if the
+            // page has not yet been allocated, other threads will not try
+            // to access it yet.
+            unsafe {
+                *s = Some(slab.into_boxed_slice());
+            }
+        });
+    }
+
+    pub(crate) fn clear<F>(
         &self,
         addr: Addr<C>,
         gen: slot::Generation<C>,
         free_list: &F,
-    ) -> Option<T>
+    ) -> Option<bool>
     where
         F: FreeList<C>,
     {
@@ -296,17 +338,11 @@ where
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
             let slot = slab.get(offset)?;
-            slot.remove_value(gen, offset, free_list)
+            Some(slot.clear_storage(gen, offset, free_list))
         })
     }
-}
 
-impl<T, C> Shared<T, C>
-where
-    T: Default,
-    C: cfg::Config,
-{
-    pub(crate) fn remove<F: FreeList<C>>(
+    pub(crate) fn mark_clear<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
         gen: slot::Generation<C>,
@@ -319,7 +355,7 @@ where
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.remove(gen, offset, free_list);
+                slot.try_clear_storage(gen, offset, free_list);
                 true
             } else {
                 false
