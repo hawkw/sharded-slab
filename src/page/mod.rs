@@ -203,7 +203,6 @@ where
     pub(crate) fn free_list(&self) -> &impl FreeList<C> {
         &self.remote
     }
-
 }
 
 impl<T, C> Shared<Option<T>, C>
@@ -272,8 +271,7 @@ where
     }
 
     pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
-        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
-        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
+        todo!()
     }
 }
 

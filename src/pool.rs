@@ -116,9 +116,9 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
 
         let shard = self.shards.get(tid.as_usize());
         if tid.is_current() {
-            shard.map(|shard| shard.remove_local(key)).unwrap_or(false)
+            shard.map(|shard| shard.clear_local(key)).unwrap_or(false)
         } else {
-            shard.map(|shard| shard.remove_remote(key)).unwrap_or(false)
+            shard.map(|shard| shard.clear_remote(key)).unwrap_or(false)
         }
     }
 }

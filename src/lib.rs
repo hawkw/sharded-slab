@@ -472,15 +472,16 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
     /// Returns an iterator over all the items in the slab.
     pub fn unique_iter(&mut self) -> iter::UniqueIter<'_, T, C> {
-        let mut shards = self.shards.iter_mut();
-        let shard = shards.next().expect("must be at least 1 shard");
-        let mut pages = shard.iter();
-        let slots = pages.next().and_then(page::Shared::iter);
-        iter::UniqueIter {
-            shards,
-            slots,
-            pages,
-        }
+        todo!()
+        // let mut shards = self.shards.iter_mut();
+        // let shard = shards.next().expect("must be at least 1 shard");
+        // let mut pages = shard.iter();
+        // let slots = pages.next().and_then(page::Shared::iter);
+        // iter::UniqueIter {
+        //     shards,
+        //     slots,
+        //     pages,
+        // }
     }
 }
 
@@ -506,39 +507,27 @@ unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
 impl<T, C> Shard<T, C>
 where
-    T: clear::Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn get_initialized_slot(&self) -> Option<usize> {
-        for (page_idx, page) in self.shared.iter().enumerate() {
-            let local = self.local(page_idx);
+    #[inline(always)]
+    pub(crate) fn get(&self, idx: usize) -> Option<page::slot::Guard<'_, T, C>> {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
 
-            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
-
-            if let offset @ Some(_) = page.get_initialized_slot(local) {
-                return offset;
-            }
+        test_println!("-> {:?}", addr);
+        if page_index > self.shared.len() {
+            return None;
         }
 
-        None
+        self.shared[page_index].get(addr, idx)
     }
+
 }
 
-impl<T, C: cfg::Config> Shard<T, C> {
-    pub(crate) fn new(tid: usize) -> Self {
-        let mut total_sz = 0;
-        let shared = (0..C::MAX_PAGES)
-            .map(|page_num| {
-                let sz = C::page_size(page_num);
-                let prev_sz = total_sz;
-                total_sz += sz;
-                page::Shared::new(sz, prev_sz)
-            })
-            .collect();
-        let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
-        Self { tid, local, shared }
-    }
-
+impl<T, C> Shard<Option<T>, C>
+where
+    C: cfg::Config,
+{
     pub(crate) fn insert(&self, value: T) -> Option<usize> {
         let mut value = Some(value);
 
@@ -554,42 +543,6 @@ impl<T, C: cfg::Config> Shard<T, C> {
         }
 
         None
-    }
-
-    #[inline(always)]
-    pub(crate) fn get(&self, idx: usize) -> Option<page::slot::Guard<'_, T, C>> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        test_println!("-> {:?}", addr);
-        if page_index > self.shared.len() {
-            return None;
-        }
-
-        self.shared[page_index].get(addr, idx)
-    }
-
-    pub(crate) fn remove_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
-    }
-
-    pub(crate) fn remove_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        let shared = &self.shared[page_index];
-        shared.remove(addr, C::unpack_gen(idx), shared.free_list())
     }
 
     /// Remove an item on the shard's local thread.
@@ -617,6 +570,108 @@ impl<T, C: cfg::Config> Shard<T, C> {
         shared.take(addr, C::unpack_gen(idx), shared.free_list())
     }
 
+    pub(crate) fn remove_local(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
+    }
+
+    pub(crate) fn remove_remote(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        let shared = &self.shared[page_index];
+        shared.remove(addr, C::unpack_gen(idx), shared.free_list())
+    }
+}
+
+impl<T, C> Shard<T, C>
+where
+    T: clear::Clear + Default,
+    C: cfg::Config,
+{
+    pub(crate) fn get_initialized_slot(&self) -> Option<usize> {
+        for (page_idx, page) in self.shared.iter().enumerate() {
+            let local = self.local(page_idx);
+
+            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
+
+            if let offset @ Some(_) = page.get_initialized_slot(local) {
+                return offset;
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn new(tid: usize) -> Self {
+        let mut total_sz = 0;
+        let shared = (0..C::MAX_PAGES)
+            .map(|page_num| {
+                let sz = C::page_size(page_num);
+                let prev_sz = total_sz;
+                total_sz += sz;
+                page::Shared::new(sz, prev_sz)
+            })
+            .collect();
+        let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
+        Self { tid, local, shared }
+    }
+
+    pub(crate) fn clear_local(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        // TODO (bhargav): god this is icky
+        if let Some(true) =
+            self.shared[page_index].clear(addr, C::unpack_gen(idx), self.local(page_index))
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn clear_remote(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        let shared = &self.shared[page_index];
+        if let Some(true) = shared.clear(addr, C::unpack_gen(idx), shared.free_list()) {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn mark_clear_local(&self, idx: usize) -> bool {
+        debug_assert_eq(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        self.shared[page_index].mark_clear(addr, C::unpack_gen(idx), self.local(page_index))
+    }
+
     #[inline(always)]
     fn local(&self, i: usize) -> &page::Local {
         #[cfg(debug_assertions)]
@@ -630,7 +685,7 @@ impl<T, C: cfg::Config> Shard<T, C> {
     }
 
     fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<T, C>> {
-        self.shared.iter()
+        todo!()
     }
 }
 
@@ -661,7 +716,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, Option<T>, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
         if self.inner.release() {
