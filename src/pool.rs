@@ -6,7 +6,7 @@ use crate::{
     Pack, Shard,
 };
 
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 pub struct Pool<T, C = DefaultConfig>
 where
@@ -36,25 +36,33 @@ where
     }
 }
 
-/// A guard that allows access to an object in a slab.
+/// A guard that allows access to an object in a pool.
 ///
-/// While the guard exists, it indicates to the slab that the item the guard references is
+/// While the guard exists, it indicates to the pool that the item the guard references is
 /// currently being accessed. If the item is removed from the pool while the guard exists, the
 /// removal will be deferred until all guards are dropped.
-pub struct PoolGuard<'a, T, C: cfg::Config = DefaultConfig> {
+pub struct PoolGuard<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
     inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
 
-impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
-    /// The number of bits in each index which are used by the slab.
+impl<T, C> Pool<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// The number of bits in each index which are used by the pool.
     ///
     /// If other data is packed into the `usize` indices returned by
     /// [`Pool::create`], user code is free to use any bits higher than the
     /// `USED_BITS`-th bit freely.
     ///
-    /// This is determined by the [`Config`] type that configures the slab's
+    /// This is determined by the [`Config`] type that configures the pool's
     /// parameters. By default, all bits are used; this can be changed by
     /// overriding the [`Config::RESERVED_BITS`][res] constant.
     ///
@@ -86,7 +94,7 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
 
     /// Return a reference to the value associated with the given key.
     ///
-    /// If the slab does not contain a value for the given key, `None` is returned instead.
+    /// If the pool does not contain a value for the given key, `None` is returned instead.
     ///
     /// # Examples
     ///
@@ -95,7 +103,7 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
     /// let key = pool.create().unwrap();
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from(""));
-    /// assert!(slab.get(12345).is_none());
+    /// assert!(pool.get(12345).is_none());
     /// ```
     pub fn get(&self, key: usize) -> Option<PoolGuard<'_, T, C>> {
         let tid = C::unpack_tid(key);
@@ -111,7 +119,41 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
         })
     }
 
+    /// Remove the value using the storage associated with the given key from the pool, reutrning
+    /// `true` if the value was removed.
+    ///
+    /// Unlike [`clear`], this method does _not_ block the current thread until the value can be
+    /// removed. Instead, if another thread is currently accessing that value, this marks it to be
+    /// removed by that thread when it finishes accessing the value.
+    ///
+    /// # Examples
+    ///
+    /// [`clear`]: #method.clear
     pub fn remove(&self, key: usize) -> bool {
+        let tid = C::unpack_tid(key);
+
+        let shard = self.shards.get(tid.as_usize());
+        if tid.is_current() {
+            shard
+                .map(|shard| shard.mark_clear_local(key))
+                .unwrap_or(false)
+        } else {
+            shard
+                .map(|shard| shard.mark_clear_remote(key))
+                .unwrap_or(false)
+        }
+    }
+
+    /// Clears the value in the storage associated with the given key from the pool, returning it.
+    ///
+    /// If the pool does not contain a value for that key, false is returned instead.
+    ///
+    /// **Note**: If the storage associated with the given key is being currently accessed by
+    /// another thread, this method will block the current thread until the item is no longer
+    /// accessed. if this is not desired, use [`remove`] instead.
+    ///
+    /// [`remove`]: #method.remove
+    pub fn clear(&self, key: usize) -> bool {
         let tid = C::unpack_tid(key);
 
         let shard = self.shards.get(tid.as_usize());
@@ -120,5 +162,64 @@ impl<T: Clear + Default, C: cfg::Config> Pool<T, C> {
         } else {
             shard.map(|shard| shard.clear_remote(key)).unwrap_or(false)
         }
+    }
+}
+
+impl<'a, T, C> PoolGuard<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Returns the key used to access this guard
+    pub fn key(&self) -> usize {
+        self.key
+    }
+}
+
+impl<'a, T, C> std::ops::Deref for PoolGuard<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.item()
+    }
+}
+
+impl<'a, T, C> Drop for PoolGuard<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        use crate::sync::atomic;
+        atomic::fence(atomic::Ordering::Acquire);
+        if Tid::<C>::current().as_usize() == self.shard.tid {
+            self.shard.mark_clear_local(self.key);
+        } else {
+            self.shard.mark_clear_remote(self.key);
+        }
+    }
+}
+
+impl<'a, T, C> fmt::Debug for PoolGuard<'a, T, C>
+where
+    T: fmt::Debug + Clear + Default,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner.item(), f)
+    }
+}
+
+impl<'a, T, C> PartialEq<T> for PoolGuard<'a, T, C>
+where
+    T: PartialEq<T> + Clear + Default,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        *self.inner.item() == *other
     }
 }

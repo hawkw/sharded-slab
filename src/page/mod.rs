@@ -290,6 +290,9 @@ where
         }
 
         self.initialize_new_slot(head, |slab| {
+            // safety: we might be aliasing a shared reference to and an exclusive one, but since
+            // we only ever acceess the `head` of the list here and other threads only access the
+            // slots they have access to, we are safe.
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");
