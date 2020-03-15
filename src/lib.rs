@@ -248,7 +248,7 @@ pub(crate) struct Shard<T, C: cfg::Config> {
     ///
     /// This consists of the page's metadata (size, previous size), remote free
     /// list, and a pointer to the actual array backing that page.
-    shared: Box<[page::Shared<T, C>]>,
+    shared: Box<[page::Shared<Option<T>, C>]>,
 }
 
 impl<T> Slab<T> {
@@ -522,13 +522,27 @@ where
         self.shared[page_index].get(addr, idx)
     }
 
+    pub(crate) fn new(tid: usize) -> Self {
+        let mut total_sz = 0;
+        let shared = (0..C::MAX_PAGES)
+            .map(|page_num| {
+                let sz = C::page_size(page_num);
+                let prev_sz = total_sz;
+                total_sz += sz;
+                page::Shared::new(sz, prev_sz)
+            })
+            .collect();
+        let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
+        Self { tid, local, shared }
+    }
+
 }
 
 impl<T, C> Shard<Option<T>, C>
 where
     C: cfg::Config,
 {
-    pub(crate) fn insert(&self, value: T) -> Option<usize> {
+    pub(crate) fn insert(&self, value: Option<T>) -> Option<usize> {
         let mut value = Some(value);
 
         // Can we fit the value into an existing page?
@@ -554,7 +568,7 @@ where
 
         self.shared
             .get(page_index)?
-            .take(addr, C::unpack_gen(idx), self.local(page_index))
+            .take(addr, C::unpack_gen(idx), self.local(page_index)).unwrap_or(None)
     }
 
     /// Remove an item, while on a different thread from the shard's local thread.
@@ -567,7 +581,7 @@ where
         test_println!("-> take_remote {:?}; page {:?}", addr, page_index);
 
         let shared = self.shared.get(page_index)?;
-        shared.take(addr, C::unpack_gen(idx), shared.free_list())
+        shared.take(addr, C::unpack_gen(idx), shared.free_list()).unwrap_or(None)
     }
 
     pub(crate) fn remove_local(&self, idx: usize) -> bool {
@@ -592,6 +606,10 @@ where
         let shared = &self.shared[page_index];
         shared.remove(addr, C::unpack_gen(idx), shared.free_list())
     }
+
+    fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<T, C>> {
+        todo!()
+    }
 }
 
 impl<T, C> Shard<T, C>
@@ -613,20 +631,6 @@ where
         None
     }
 
-    pub(crate) fn new(tid: usize) -> Self {
-        let mut total_sz = 0;
-        let shared = (0..C::MAX_PAGES)
-            .map(|page_num| {
-                let sz = C::page_size(page_num);
-                let prev_sz = total_sz;
-                total_sz += sz;
-                page::Shared::new(sz, prev_sz)
-            })
-            .collect();
-        let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
-        Self { tid, local, shared }
-    }
-
     pub(crate) fn clear_local(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
@@ -635,14 +639,9 @@ where
             return false;
         }
 
-        // TODO (bhargav): god this is icky
-        if let Some(true) =
-            self.shared[page_index].clear(addr, C::unpack_gen(idx), self.local(page_index))
-        {
-            true
-        } else {
-            false
-        }
+        self.shared[page_index]
+            .clear(addr, C::unpack_gen(idx), self.local(page_index))
+            .unwrap_or(false)
     }
 
     pub(crate) fn clear_remote(&self, idx: usize) -> bool {
@@ -653,12 +652,7 @@ where
             return false;
         }
 
-        let shared = &self.shared[page_index];
-        if let Some(true) = shared.clear(addr, C::unpack_gen(idx), shared.free_list()) {
-            true
-        } else {
-            false
-        }
+        shared.clear(addr, C::unpack_gen(idx), shared.free_list()).unwrap_or(false)
     }
 
     pub(crate) fn mark_clear_local(&self, idx: usize) -> bool {
@@ -670,6 +664,18 @@ where
         }
 
         self.shared[page_index].mark_clear(addr, C::unpack_gen(idx), self.local(page_index))
+    }
+
+    pub(crate) fn mark_clear_remote(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        let shared = &self.shared[page_index];
+        shared.mark_clear(addr, C::unpack_gen(idx), shared.free_list())
     }
 
     #[inline(always)]
@@ -684,9 +690,6 @@ where
         &self.local[i]
     }
 
-    fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<T, C>> {
-        todo!()
-    }
 }
 
 impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {

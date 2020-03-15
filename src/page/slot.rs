@@ -386,7 +386,7 @@ where
         free: &F,
     ) -> Option<T> {
         self.release_with(gen, offset, free, |item| {
-            item.and_then(|inner| inner.take())
+            item.and_then(Option::take)
         })
     }
 }
