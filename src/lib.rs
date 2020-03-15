@@ -201,7 +201,7 @@ use std::{fmt, marker::PhantomData};
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
 pub struct Slab<T, C: cfg::Config = DefaultConfig> {
-    shards: Box<[Shard<T, C>]>,
+    shards: Box<[Shard<Option<T>, C>]>,
     _cfg: PhantomData<C>,
 }
 
@@ -211,8 +211,8 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct SlabGuard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, T, C>,
-    shard: &'a Shard<T, C>,
+    inner: page::slot::Guard<'a, Option<T>, C>,
+    shard: &'a Shard<Option<T>, C>,
     key: usize,
 }
 
@@ -248,7 +248,7 @@ pub(crate) struct Shard<T, C: cfg::Config> {
     ///
     /// This consists of the page's metadata (size, previous size), remote free
     /// list, and a pointer to the actual array backing that page.
-    shared: Box<[page::Shared<Option<T>, C>]>,
+    shared: Box<[page::Shared<T, C>]>,
 }
 
 impl<T> Slab<T> {
@@ -542,7 +542,7 @@ impl<T, C> Shard<Option<T>, C>
 where
     C: cfg::Config,
 {
-    pub(crate) fn insert(&self, value: Option<T>) -> Option<usize> {
+    pub(crate) fn insert(&self, value: T) -> Option<usize> {
         let mut value = Some(value);
 
         // Can we fit the value into an existing page?
@@ -568,7 +568,7 @@ where
 
         self.shared
             .get(page_index)?
-            .take(addr, C::unpack_gen(idx), self.local(page_index)).unwrap_or(None)
+            .take(addr, C::unpack_gen(idx), self.local(page_index))
     }
 
     /// Remove an item, while on a different thread from the shard's local thread.
@@ -581,7 +581,7 @@ where
         test_println!("-> take_remote {:?}; page {:?}", addr, page_index);
 
         let shared = self.shared.get(page_index)?;
-        shared.take(addr, C::unpack_gen(idx), shared.free_list()).unwrap_or(None)
+        shared.take(addr, C::unpack_gen(idx), shared.free_list())
     }
 
     pub(crate) fn remove_local(&self, idx: usize) -> bool {
@@ -651,12 +651,12 @@ where
         if page_index > self.shared.len() {
             return false;
         }
-
+        let shared = &self.shared[page_index];
         shared.clear(addr, C::unpack_gen(idx), shared.free_list()).unwrap_or(false)
     }
 
     pub(crate) fn mark_clear_local(&self, idx: usize) -> bool {
-        debug_assert_eq(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -712,14 +712,14 @@ impl<'a, T, C: cfg::Config> SlabGuard<'a, T, C> {
 }
 
 impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
-    type Target = T;
+    type Target = Option<T>;
 
     fn deref(&self) -> &Self::Target {
         self.inner.item()
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, Option<T>, C> {
+impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, T, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
         if self.inner.release() {
@@ -749,7 +749,7 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().eq(other)
+        self.inner.item().as_ref() == Some(other)
     }
 }
 
