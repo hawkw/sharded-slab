@@ -99,7 +99,11 @@ where
     }
 
     #[inline(always)]
-    pub(in crate::page) fn get(&self, gen: Generation<C>) -> Option<Guard<'_, T, C>> {
+    pub(in crate::page) fn get<U>(
+        &self,
+        gen: Generation<C>,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<Guard<'_, U, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -136,7 +140,7 @@ where
                 Ok(_) => {
                     // Okay, the ref count was incremented successfully! We can
                     // now return a guard!
-                    let item = self.value();
+                    let item = f(self.value());
 
                     test_println!("-> {:?}", new_refs);
 
