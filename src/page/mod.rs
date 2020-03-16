@@ -186,7 +186,12 @@ where
     }
 
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
+    pub(crate) fn get<U>(
+        &self,
+        addr: Addr<C>,
+        idx: usize,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<slot::Guard<'_, U, C>> {
         let poff = addr.offset() - self.prev_sz;
 
         test_println!("-> offset {:?}", poff);
@@ -195,7 +200,7 @@ where
             unsafe { &*slab }
                 .as_ref()?
                 .get(poff)?
-                .get(C::unpack_gen(idx))
+                .get(C::unpack_gen(idx), f)
         })
     }
 

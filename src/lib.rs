@@ -213,7 +213,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct SlabGuard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, Option<T>, C>,
+    inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<Option<T>, C>,
     key: usize,
 }
@@ -410,7 +410,11 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
-        let inner = self.shards.get(tid.as_usize())?.get(key)?;
+        let inner = self.shards.get(tid.as_usize())?.get(key, |x| {
+            x.as_ref().expect(
+                "if a slot can be accessed at the current generation, its value must be `Some`",
+            )
+        })?;
 
         Some(SlabGuard {
             inner,
@@ -480,7 +484,7 @@ impl<'a, T, C: cfg::Config> SlabGuard<'a, T, C> {
 }
 
 impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
-    type Target = Option<T>;
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.inner.item()
@@ -517,7 +521,7 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().as_ref() == Some(other)
+        self.inner.item().eq(other)
     }
 }
 

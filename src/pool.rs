@@ -109,7 +109,7 @@ where
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
-        let inner = self.shards.get(tid.as_usize())?.get(key)?;
+        let inner = self.shards.get(tid.as_usize())?.get(key, |x| x)?;
 
         Some(PoolGuard {
             inner,
