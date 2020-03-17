@@ -443,16 +443,15 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
     /// Returns an iterator over all the items in the slab.
     pub fn unique_iter(&mut self) -> iter::UniqueIter<'_, T, C> {
-        todo!()
-        // let mut shards = self.shards.iter_mut();
-        // let shard = shards.next().expect("must be at least 1 shard");
-        // let mut pages = shard.iter();
-        // let slots = pages.next().and_then(page::Shared::iter);
-        // iter::UniqueIter {
-        //     shards,
-        //     slots,
-        //     pages,
-        // }
+        let mut shards = self.shards.iter_mut();
+        let shard = shards.next().expect("must be at least 1 shard");
+        let mut pages = shard.iter();
+        let slots = pages.next().and_then(page::Shared::iter);
+        iter::UniqueIter {
+            shards,
+            slots,
+            pages,
+        }
     }
 }
 

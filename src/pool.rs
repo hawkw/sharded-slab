@@ -92,7 +92,10 @@ where
             .map(|idx| tid.pack(idx))
     }
 
-    pub fn create_with(&self, value: T) -> Option<usize> where T: Clone {
+    pub fn create_with(&self, value: T) -> Option<usize>
+    where
+        T: Clone,
+    {
         let tid = Tid::<C>::current();
         test_println!("pool: create_with {:?}", tid);
         self.shards[tid.as_usize()]

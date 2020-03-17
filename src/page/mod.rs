@@ -63,8 +63,12 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, C> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
+type RefMaker<'a, T, C> = fn(&'a Slot<Option<T>, C>) -> Option<&'a T>;
+
+pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
+    std::slice::Iter<'a, Slot<Option<T>, C>>,
+    RefMaker<'a, T, C>,
+>;
 
 pub(crate) struct Local {
     // index of the first slot on the local free list
@@ -210,9 +214,9 @@ where
     }
 }
 
-impl<T, C> Shared<Option<T>, C>
+impl<'a, T, C> Shared<Option<T>, C>
 where
-    C: cfg::Config,
+    C: cfg::Config + 'a,
 {
     #[inline]
     pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
@@ -275,8 +279,19 @@ where
         })
     }
 
-    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
-        todo!()
+    // Need this function separately, as we need to pass a function pointer to `filter_map` and
+    // `Slot::value` just returns a `&T`, specifically a `&Option<T>` for this impl.
+    fn make_ref(slot: &'a Slot<Option<T>, C>) -> Option<&'a T> {
+        slot.value().as_ref()
+    }
+
+    pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| {
+            slab.iter()
+                // RefMaker is a function pointer.
+                .filter_map(Shared::make_ref as RefMaker<'a, T, C>)
+        })
     }
 }
 
@@ -286,7 +301,11 @@ where
     C: cfg::Config,
 {
     #[inline]
-    pub(crate) fn get_initialized_slot(&self, local: &Local, f: &mut dyn FnMut(&mut T)) -> Option<usize> {
+    pub(crate) fn get_initialized_slot(
+        &self,
+        local: &Local,
+        f: &mut dyn FnMut(&mut T),
+    ) -> Option<usize> {
         let head = self.get_head(local)?;
 
         // do we need to allocate storage for this page?

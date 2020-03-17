@@ -329,12 +329,10 @@ where
             return None;
         }
 
-
         // call provided function to update this slot
         self.item.with_mut(|item| unsafe {
             (f)(&mut *item);
         });
-
 
         Some(gen)
     }
@@ -357,7 +355,9 @@ where
         debug_assert!(self.is_empty(), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
 
-        let gen = self.initialize_state(&mut |item| { *item = value.take(); })?;
+        let gen = self.initialize_state(&mut |item| {
+            *item = value.take();
+        })?;
         test_println!("-> inserted at {:?}", gen);
 
         Some(gen)

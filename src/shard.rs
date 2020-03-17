@@ -148,8 +148,8 @@ where
         shared.remove(addr, C::unpack_gen(idx), shared.free_list())
     }
 
-    fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<T, C>> {
-        todo!()
+    pub(crate) fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<Option<T>, C>> {
+        self.shared.iter()
     }
 }
 
