@@ -81,14 +81,22 @@ where
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
     ///
-    /// let key = pool.create().unwrap();
-    /// assert_eq!(pool.get(key).unwrap(), String::from(""));
+    /// let key = pool.create(|item| *item = "hello".to_string()).unwrap();
+    /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
-    pub fn create(&self) -> Option<usize> {
+    pub fn create(&self, mut initilizer: impl FnMut(&mut T)) -> Option<usize> {
         let tid = Tid::<C>::current();
         test_println!("pool: create {:?}", tid);
         self.shards[tid.as_usize()]
-            .get_initialized_slot()
+            .get_initialized_slot(&mut initilizer)
+            .map(|idx| tid.pack(idx))
+    }
+
+    pub fn create_with(&self, value: T) -> Option<usize> where T: Clone {
+        let tid = Tid::<C>::current();
+        test_println!("pool: create_with {:?}", tid);
+        self.shards[tid.as_usize()]
+            .get_initialized_slot(&mut move |item| *item = value.clone())
             .map(|idx| tid.pack(idx))
     }
 

@@ -286,7 +286,7 @@ where
     C: cfg::Config,
 {
     #[inline]
-    pub(crate) fn get_initialized_slot(&self, local: &Local) -> Option<usize> {
+    pub(crate) fn get_initialized_slot(&self, local: &Local, f: &mut dyn FnMut(&mut T)) -> Option<usize> {
         let head = self.get_head(local)?;
 
         // do we need to allocate storage for this page?
@@ -302,8 +302,9 @@ where
                 .as_ref()
                 .expect("page must have been allocated to insert!");
             let slot = &slab[head];
-            let gen = slot.initialize_state();
+            let gen = slot.initialize_state(f);
             local.set_head(slot.next());
+
             gen
         })
     }
