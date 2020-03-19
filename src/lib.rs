@@ -196,6 +196,8 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 
+pub use pool::Pool;
+
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
 
@@ -612,5 +614,7 @@ impl<C: cfg::Config> Pack<C> for () {
 
 #[cfg(test)]
 pub(crate) use self::tests::util as test_util;
+#[cfg(test)]
+mod pool_tests;
 #[cfg(test)]
 mod tests;

@@ -65,10 +65,8 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
 
 type RefMaker<'a, T, C> = fn(&'a Slot<Option<T>, C>) -> Option<&'a T>;
 
-pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
-    std::slice::Iter<'a, Slot<Option<T>, C>>,
-    RefMaker<'a, T, C>,
->;
+pub(crate) type Iter<'a, T, C> =
+    std::iter::FilterMap<std::slice::Iter<'a, Slot<Option<T>, C>>, RefMaker<'a, T, C>>;
 
 pub(crate) struct Local {
     // index of the first slot on the local free list
