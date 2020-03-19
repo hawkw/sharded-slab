@@ -176,6 +176,19 @@ where
     }
 }
 
+unsafe impl<T, C> Send for Pool<T, C>
+where
+    T: Send + Clear + Default,
+    C: cfg::Config,
+{
+}
+unsafe impl<T, C> Sync for Pool<T, C>
+where
+    T: Sync + Clear + Default,
+    C: cfg::Config,
+{
+}
+
 impl<'a, T, C> PoolGuard<'a, T, C>
 where
     T: Clear + Default,

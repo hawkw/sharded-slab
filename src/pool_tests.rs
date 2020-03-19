@@ -1,14 +1,5 @@
 use crate::{clear::Clear, tests::util::*, Pool};
-use std::{
-    sync::{Arc, Mutex},
-    thread,
-};
-
-struct TinyConfig;
-
-impl crate::Config for TinyConfig {
-    const INITIAL_PAGE_SIZE: usize = 4;
-}
+use std::{sync::{ Arc, Mutex }, thread};
 
 #[derive(Default)]
 struct DontDropMe {
@@ -19,27 +10,21 @@ struct DontDropMe {
 impl DontDropMe {
     fn new() -> Self {
         Self {
-            drop: Mutex::new(true),
-            clear: Mutex::new(true),
+            drop: Mutex::new(false),
+            clear: Mutex::new(false),
         }
-    }
-
-    fn print_state(&mut self) {
-        println!("{:?}, {:?}", self.drop, self.clear);
     }
 }
 
 impl Drop for DontDropMe {
     fn drop(&mut self) {
-        let val = self.drop.lock().unwrap();
-        *val = true;
+        *self.drop.lock().unwrap() = true;
     }
 }
 
 impl Clear for DontDropMe {
     fn clear(&mut self) {
-        let val = self.clear.lock().unwrap();
-        *val = true;
+        *self.clear.lock().unwrap() = true;
     }
 }
 
@@ -47,21 +32,22 @@ impl Clear for DontDropMe {
 fn dont_drop() {
     run_model("dont_drop", || {
         let pool = Arc::new(Pool::new());
-        let item1 = DontDropMe::new();
-        let item2 = DontDropMe::new();
+        let item1 = Arc::new(DontDropMe::new());
+        let item2 = Arc::new(DontDropMe::new());
 
         let p = pool.clone();
-        let t1 = thread::spawn(|| {
-            p.create(|item: &mut DontDropMe| *item = item1)
+        let i = item1.clone();
+        let t1 = thread::spawn(move || {
+            p.create(|item: &mut Arc<DontDropMe>| *item = i.clone())
                 .expect("Create");
         });
 
         let p = pool.clone();
         let idx = p
-            .create(|item: &mut DontDropMe| *item = item2)
+            .create(|item: &mut Arc<DontDropMe>| *item = item2.clone())
             .expect("Create");
 
-        t1.join();
+        t1.join().expect("Failed to join thread 1");
         assert!(!*item1.drop.lock().unwrap());
         assert!(*item1.clear.lock().unwrap());
 

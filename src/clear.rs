@@ -1,4 +1,4 @@
-use std::{collections, hash, ops::DerefMut, sync};
+use std::{sync::Arc, collections, hash, ops::DerefMut, sync};
 
 pub trait Clear {
     /// Clear all data in `self`, retaining the allocated capacithy.
@@ -25,6 +25,13 @@ where
     #[inline]
     fn clear(&mut self) {
         self.deref_mut().clear()
+    }
+}
+
+impl<T> Clear for Arc<T> where T: Clear {
+    #[inline]
+    fn clear(&mut self) {
+        self.clear()
     }
 }
 
