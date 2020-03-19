@@ -35,21 +35,21 @@ fn dont_drop() {
         let item1 = Arc::new(DontDropMe::new());
         let item2 = Arc::new(DontDropMe::new());
 
-        let p = pool.clone();
-        let i = item1.clone();
-        let t1 = thread::spawn(move || {
-            p.create(|item: &mut Arc<DontDropMe>| *item = i.clone())
-                .expect("Create");
-        });
+        // let p = pool.clone();
+        // let i = item1.clone();
+        // let t1 = thread::spawn(move || {
+        //     p.create(|item: &mut Arc<DontDropMe>| *item = i.clone())
+        //         .expect("Create");
+        // });
 
         let p = pool.clone();
         let idx = p
             .create(|item: &mut Arc<DontDropMe>| *item = item2.clone())
             .expect("Create");
 
-        t1.join().expect("Failed to join thread 1");
-        assert!(!*item1.drop.lock().unwrap());
-        assert!(*item1.clear.lock().unwrap());
+        // t1.join().expect("Failed to join thread 1");
+        // assert!(!*item1.drop.lock().unwrap());
+        // assert!(*item1.clear.lock().unwrap());
 
         p.clear(idx);
         assert!(!*item2.drop.lock().unwrap());
