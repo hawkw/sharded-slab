@@ -220,11 +220,13 @@ where
     fn drop(&mut self) {
         use crate::sync::atomic;
         test_println!(" -> drop PoolGuard: clearing data");
-        atomic::fence(atomic::Ordering::Acquire);
-        if Tid::<C>::current().as_usize() == self.shard.tid {
-            self.shard.mark_clear_local(self.key);
-        } else {
-            self.shard.mark_clear_remote(self.key);
+        if self.inner.release() {
+            atomic::fence(atomic::Ordering::Acquire);
+            if Tid::<C>::current().as_usize() == self.shard.tid {
+                self.shard.mark_clear_local(self.key);
+            } else {
+                self.shard.mark_clear_remote(self.key);
+            }
         }
     }
 }

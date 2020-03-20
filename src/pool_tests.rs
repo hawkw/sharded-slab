@@ -1,8 +1,11 @@
 use crate::{clear::Clear, tests::util::*, Pool};
-use loom::{thread, sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-} };
+use loom::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 
 #[derive(Default, Debug)]
 struct DontDropMe {
@@ -38,34 +41,47 @@ impl Clear for Arc<DontDropMe> {
 #[test]
 fn dont_drop() {
     run_model("dont_drop", || {
-        let pool: Arc<Pool<Arc<DontDropMe>>> = Arc::new(Pool::new());
+        let pool: Pool<Arc<DontDropMe>> = Pool::new();
         let item1 = Arc::new(DontDropMe::new(1));
-        let item2 = Arc::new(DontDropMe::new(2));
-
-        let p = pool.clone();
+        test_println!("-> dont_drop: Inserting into pool {}", item1.id);
         let value = item1.clone();
-        let t1 = thread::spawn(move || {
-            test_println!("-> dont_drop: Inserting into pool {}", value.id);
-            let idx = p.create(|item: &mut Arc<DontDropMe>| *item = value.clone())
-                .expect("Create");
-            let _guard = p.get(idx);
-        });
-
-        let p = pool.clone();
-        let value = item2.clone();
-        test_println!("-> dont_drop: Inserting into pool {}", value.id);
-        let idx = p
+        let idx = pool
             .create(move |item| *item = value.clone())
             .expect("Create");
 
         test_println!("-> dont_drop: clearing idx: {}", idx);
-        p.clear(idx);
+        pool.clear(idx);
 
-        assert!(!item2.drop.load(Ordering::SeqCst));
-        assert!(item2.clear.load(Ordering::SeqCst));
-
-        t1.join().expect("Failed to join thread 1");
         assert!(!item1.drop.load(Ordering::SeqCst));
         assert!(item1.clear.load(Ordering::SeqCst));
     });
+}
+
+#[test]
+fn dont_drop_across_threads() {
+    run_model("dont_drop_across_threads", || {
+        let pool: Arc<Pool<Arc<DontDropMe>>> = Arc::new(Pool::new());
+
+        let item1 = Arc::new(DontDropMe::new(1));
+        let value = item1.clone();
+        let idx1 = pool
+            .create(move |item| *item = value.clone())
+            .expect("Create");
+
+        let p = pool.clone();
+        let item = item1.clone();
+        let t1 = thread::spawn(move || {
+            assert_eq!(p.get(idx1).unwrap().id, item.id);
+        });
+
+        let item = item1.clone();
+        assert!(item.drop.load(Ordering::SeqCst));
+        assert!(item.clear.load(Ordering::SeqCst));
+
+        t1.join().expect("thread 1 unable to join");
+        pool.clear(idx1);
+
+        assert!(!item1.drop.load(Ordering::SeqCst));
+        assert!(item1.clear.load(Ordering::SeqCst));
+    })
 }
