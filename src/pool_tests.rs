@@ -1,58 +1,71 @@
 use crate::{clear::Clear, tests::util::*, Pool};
-use std::{sync::{ Arc, Mutex }, thread};
+use loom::{thread, sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+} };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct DontDropMe {
-    drop: Mutex<bool>,
-    clear: Mutex<bool>,
+    id: usize,
+    drop: AtomicBool,
+    clear: AtomicBool,
 }
 
 impl DontDropMe {
-    fn new() -> Self {
+    fn new(id: usize) -> Self {
         Self {
-            drop: Mutex::new(false),
-            clear: Mutex::new(false),
+            id,
+            drop: AtomicBool::new(false),
+            clear: AtomicBool::new(false),
         }
     }
 }
 
 impl Drop for DontDropMe {
     fn drop(&mut self) {
-        *self.drop.lock().unwrap() = true;
+        test_println!("-> DontDropMe drop: dropping data {:?}", self.id);
+        self.drop.store(true, Ordering::SeqCst);
     }
 }
 
-impl Clear for DontDropMe {
+impl Clear for Arc<DontDropMe> {
     fn clear(&mut self) {
-        *self.clear.lock().unwrap() = true;
+        test_println!("-> DontDropMe clear: clearing data {:?}", self.id);
+        self.clear.store(true, Ordering::SeqCst);
     }
 }
 
 #[test]
 fn dont_drop() {
     run_model("dont_drop", || {
-        let pool = Arc::new(Pool::new());
-        let item1 = Arc::new(DontDropMe::new());
-        let item2 = Arc::new(DontDropMe::new());
-
-        // let p = pool.clone();
-        // let i = item1.clone();
-        // let t1 = thread::spawn(move || {
-        //     p.create(|item: &mut Arc<DontDropMe>| *item = i.clone())
-        //         .expect("Create");
-        // });
+        let pool: Arc<Pool<Arc<DontDropMe>>> = Arc::new(Pool::new());
+        let item1 = Arc::new(DontDropMe::new(1));
+        let item2 = Arc::new(DontDropMe::new(2));
 
         let p = pool.clone();
+        let value = item1.clone();
+        let t1 = thread::spawn(move || {
+            test_println!("-> dont_drop: Inserting into pool {}", value.id);
+            let idx = p.create(|item: &mut Arc<DontDropMe>| *item = value.clone())
+                .expect("Create");
+            let _guard = p.get(idx);
+        });
+
+        let p = pool.clone();
+        let value = item2.clone();
+        test_println!("-> dont_drop: Inserting into pool {}", value.id);
         let idx = p
-            .create(|item: &mut Arc<DontDropMe>| *item = item2.clone())
+            .create(move |item| *item = value.clone())
             .expect("Create");
 
-        // t1.join().expect("Failed to join thread 1");
-        // assert!(!*item1.drop.lock().unwrap());
-        // assert!(*item1.clear.lock().unwrap());
-
+        test_println!("-> dont_drop: clearing idx: {}", idx);
         p.clear(idx);
-        assert!(!*item2.drop.lock().unwrap());
-        assert!(*item2.clear.lock().unwrap());
+
+        assert!(!item2.drop.load(Ordering::SeqCst));
+        assert!(item2.clear.load(Ordering::SeqCst));
+
+        t1.join().expect("Failed to join thread 1");
+        assert!(!item1.drop.load(Ordering::SeqCst));
+        assert!(item1.clear.load(Ordering::SeqCst));
     });
 }

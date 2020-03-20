@@ -142,7 +142,7 @@ where
                     // now return a guard!
                     let item = f(self.value());
 
-                    test_println!("-> {:?}", new_refs);
+                    test_println!("-> get: {:?}", new_refs);
 
                     return Some(Guard {
                         item,

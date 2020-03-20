@@ -183,7 +183,7 @@ where
 
         let index = head + self.prev_sz;
 
-        test_println!("insert at offset: {}", index);
+        test_println!("-> initialize_new_slot: insert at offset: {}", index);
         Some(gen.pack(index))
     }
 
@@ -357,7 +357,7 @@ where
     {
         let offset = addr.offset() - self.prev_sz;
 
-        test_println!("-> take: offset {:?}", offset);
+        test_println!("-> clear: offset {:?}", offset);
 
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
