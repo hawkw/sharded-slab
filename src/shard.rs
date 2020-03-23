@@ -158,13 +158,17 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn get_initialized_slot(&self, f: &mut dyn FnMut(&mut T)) -> Option<usize> {
+    pub(crate) fn get_initialized_slot(&self, f: impl FnOnce(&mut T)) -> Option<usize> {
+        let mut f = Some(f);
         for (page_idx, page) in self.shared.iter().enumerate() {
             let local = self.local(page_idx);
 
             test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
-            if let offset @ Some(_) = page.get_initialized_slot(local, f) {
+            if let offset @ Some(_) = page.get_initialized_slot(local, |x| {
+                let f = f.take().expect("initializer will not be called twice");
+                (f)(x)
+            }) {
                 return offset;
             }
         }
