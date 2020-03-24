@@ -1,4 +1,7 @@
-use crate::page::{slot::Generation, Addr};
+use crate::page::{
+    slot::{Generation, RefCount},
+    Addr,
+};
 use crate::Pack;
 use std::{fmt, marker::PhantomData};
 /// Configuration parameters which can be overridden to tune the behavior of a slab.
@@ -79,6 +82,13 @@ pub(crate) trait CfgPrivate: Config {
             "invalid Config: {:#?}\nindices are too large to fit reserved bits!",
             Self::debug()
         );
+
+        assert!(
+            RefCount::<Self>::MAX > 1,
+            "invalid config: {:#?}\n maximum concurrent references would be {}",
+            Self::debug(),
+            RefCount::<Self>::MAX,
+        );
     }
 
     #[inline(always)]
@@ -143,6 +153,32 @@ impl<C: Config> fmt::Debug for DebugConfig<C> {
             .field("used_bits", &C::USED_BITS)
             .field("reserved_bits", &C::RESERVED_BITS)
             .field("pointer_width", &WIDTH)
+            .field("max_concurrent_references", &RefCount::<C>::MAX)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{test_util::*, Slab};
+
+    #[test]
+    #[should_panic]
+    fn validates_max_refs() {
+        struct GiantGenConfig;
+
+        // Configure the slab with a very large number of bits for the generation
+        // counter. This will only leave 1 bit to use for the slot reference
+        // counter, which will fail to validate.
+        impl Config for GiantGenConfig {
+            const INITIAL_PAGE_SIZE: usize = 1;
+            const MAX_THREADS: usize = 1;
+            const MAX_PAGES: usize = 1;
+        }
+
+        run_model("validates_max_refs", || {
+            let _slab = Slab::<usize>::new_with_config::<GiantGenConfig>();
+        })
     }
 }

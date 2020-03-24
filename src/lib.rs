@@ -421,8 +421,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
     /// Return a reference to the value associated with the given key.
     ///
-    /// If the slab does not contain a value for the given key, `None` is
-    /// returned instead.
+    /// If the slab does not contain a value for the given key, or if the
+    /// maximum number of concurrent references to the slot has been reached,
+    /// `None` is returned instead.
     ///
     /// # Examples
     ///
