@@ -172,32 +172,6 @@ where
         None
     }
 
-    pub(crate) fn clear_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        self.shared[page_index]
-            .clear(addr, C::unpack_gen(idx), self.local(page_index))
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn clear_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-        let shared = &self.shared[page_index];
-        shared
-            .clear(addr, C::unpack_gen(idx), shared.free_list())
-            .unwrap_or(false)
-    }
-
     pub(crate) fn mark_clear_local(&self, idx: usize) -> bool {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);

@@ -142,7 +142,7 @@ where
                     // now return a guard!
                     let item = f(self.value());
 
-                    test_println!("-> get: {:?}", new_refs);
+                    test_println!("-> {:?}", new_refs);
 
                     return Some(Guard {
                         item,
@@ -331,7 +331,7 @@ where
 
         // call provided function to update this slot
         self.item.with_mut(|item| unsafe {
-            (f)(&mut *item);
+            f(&mut *item);
         });
 
         Some(gen)
@@ -442,11 +442,10 @@ where
         // release_with will _always_ wait unitl it can release the slot or just return if the slot
         // has already been released.
         self.release_with(gen, offset, free, |item| {
-            // Only call clear if this slot actually had some value stored. If it's already been
-            // deleted, do nothing
-            item.and_then(|inner| Some(Clear::clear(inner)))
-        });
-        true
+            let val = item.and_then(|inner| Some(Clear::clear(inner))).is_some();
+            test_println!("-> {}", val);
+            val
+        })
     }
 }
 

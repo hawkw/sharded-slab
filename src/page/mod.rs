@@ -346,26 +346,6 @@ where
         });
     }
 
-    pub(crate) fn clear<F>(
-        &self,
-        addr: Addr<C>,
-        gen: slot::Generation<C>,
-        free_list: &F,
-    ) -> Option<bool>
-    where
-        F: FreeList<C>,
-    {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> clear: offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref()?;
-            let slot = slab.get(offset)?;
-            Some(slot.clear_storage(gen, offset, free_list))
-        })
-    }
-
     pub(crate) fn mark_clear<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
@@ -379,8 +359,7 @@ where
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.try_clear_storage(gen, offset, free_list);
-                true
+                slot.try_clear_storage(gen, offset, free_list)
             } else {
                 false
             }

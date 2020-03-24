@@ -140,7 +140,7 @@ where
     /// # Examples
     ///
     /// [`clear`]: #method.clear
-    pub fn remove(&self, key: usize) -> bool {
+    pub fn clear(&self, key: usize) -> bool {
         let tid = C::unpack_tid(key);
 
         let shard = self.shards.get(tid.as_usize());
@@ -152,26 +152,6 @@ where
             shard
                 .map(|shard| shard.mark_clear_remote(key))
                 .unwrap_or(false)
-        }
-    }
-
-    /// Clears the value in the storage associated with the given key from the pool, returning it.
-    ///
-    /// If the pool does not contain a value for that key, false is returned instead.
-    ///
-    /// **Note**: If the storage associated with the given key is being currently accessed by
-    /// another thread, this method will block the current thread until the item is no longer
-    /// accessed. if this is not desired, use [`remove`] instead.
-    ///
-    /// [`remove`]: #method.remove
-    pub fn clear(&self, key: usize) -> bool {
-        let tid = C::unpack_tid(key);
-
-        let shard = self.shards.get(tid.as_usize());
-        if tid.is_current() {
-            shard.map(|shard| shard.clear_local(key)).unwrap_or(false)
-        } else {
-            shard.map(|shard| shard.clear_remote(key)).unwrap_or(false)
         }
     }
 }
