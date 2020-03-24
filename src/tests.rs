@@ -483,6 +483,44 @@ fn custom_page_sz() {
     });
 }
 
+#[test]
+fn max_refs() {
+    struct LargeGenConfig;
+
+    // Configure the slab with a very large number of bits for the generation
+    // counter. That way, there will be very few bits for the ref count left
+    // over, and this test won't have to malloc millions of references.
+    impl crate::cfg::Config for LargeGenConfig {
+        const INITIAL_PAGE_SIZE: usize = 2;
+        const MAX_THREADS: usize = 32;
+        const MAX_PAGES: usize = 2;
+    }
+
+    let mut model = loom::model::Builder::new();
+    model.max_branches = 100000;
+    model.check(|| {
+        let slab = Slab::new_with_config::<LargeGenConfig>();
+        let key = slab.insert("hello world").unwrap();
+        let max = crate::page::slot::RefCount::<LargeGenConfig>::MAX;
+
+        // Create the maximum number of concurrent references to the entry.
+        let mut refs = (0..max)
+            .map(|_| slab.get(key).unwrap())
+            // Store the refs in a vec so they don't get dropped immediately.
+            .collect::<Vec<_>>();
+
+        assert!(slab.get(key).is_none());
+
+        // After dropping a ref, we should now be able to access the slot again.
+        drop(refs.pop());
+        let ref1 = slab.get(key);
+        assert!(ref1.is_some());
+
+        // Ref1 should max out the number of references again.
+        assert!(slab.get(key).is_none());
+    })
+}
+
 mod free_list_reuse {
     use super::*;
     struct TinyConfig;
