@@ -27,18 +27,18 @@ pub(crate) struct Generation<C = cfg::DefaultConfig> {
     value: usize,
     _cfg: PhantomData<fn(C)>,
 }
-struct LifecycleGen<C>(Generation<C>);
 
 #[repr(transparent)]
-struct RefCount<C = cfg::DefaultConfig> {
+pub(crate) struct RefCount<C = cfg::DefaultConfig> {
     value: usize,
     _cfg: PhantomData<fn(C)>,
 }
 
-struct Lifecycle<C> {
+pub(crate) struct Lifecycle<C> {
     state: State,
     _cfg: PhantomData<fn(C)>,
 }
+struct LifecycleGen<C>(Generation<C>);
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(usize)]
@@ -110,6 +110,15 @@ impl<T, C: cfg::Config> Slot<T, C> {
             // generation, return `None`.
             if gen != current_gen || state != Lifecycle::NOT_REMOVED {
                 test_println!("-> get: no longer exists!");
+                return None;
+            }
+
+            // Would incrementing the ref count cause an overflow?
+            if refs.value >= RefCount::<C>::MAX {
+                test_println!(
+                    "-> get: max concurrent references ({}) reached!",
+                    RefCount::<C>::MAX
+                );
                 return None;
             }
 
@@ -300,6 +309,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 test_println!("-> already removed!");
                 return None;
             }
+
             match self.lifecycle.compare_exchange(
                 lifecycle,
                 next_gen.pack(lifecycle),
@@ -509,7 +519,7 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
     type Prev = Lifecycle<C>;
 
     fn from_usize(value: usize) -> Self {
-        debug_assert!(value <= Self::BITS);
+        debug_assert!(value <= Self::MAX);
         Self {
             value,
             _cfg: PhantomData,
@@ -522,14 +532,25 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 }
 
 impl<C: cfg::Config> RefCount<C> {
+    pub(crate) const MAX: usize = Self::BITS;
+
     #[inline]
     fn incr(self) -> Self {
-        Self::from_usize((self.value + 1) % Self::BITS)
+        // It's okay for this to be a debug assertion, because the check in
+        // `Slot::get` should protect against incrementing the reference count
+        // if it would overflow. This is intended to test that the check is in
+        // place.
+        debug_assert!(
+            self.value < Self::MAX,
+            "incrementing ref count would overflow max value ({})",
+            Self::MAX
+        );
+        Self::from_usize(self.value + 1)
     }
 
     #[inline]
     fn decr(self) -> Self {
-        Self::from_usize(self.value.saturating_sub(1))
+        Self::from_usize(self.value - 1)
     }
 }
 
