@@ -85,11 +85,15 @@ where
     /// let key = pool.create(|item| *item = value.take().expect("created twice")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
-    pub fn create(&self, initilizer: impl FnOnce(&mut T)) -> Option<usize> {
+    pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
         let tid = Tid::<C>::current();
+        let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
         self.shards[tid.as_usize()]
-            .get_initialized_slot(initilizer)
+            .init_with(|slot| {
+                let init = init.take().expect("initializer will only be called once");
+                slot.initialize_state(init)
+            })
             .map(|idx| tid.pack(idx))
     }
 
@@ -109,12 +113,7 @@ where
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
     pub fn create_with(&self, value: T) -> Option<usize> {
-        let tid = Tid::<C>::current();
-        let mut value = Some(value);
-        test_println!("pool: create_with {:?}", tid);
-        self.shards[tid.as_usize()]
-            .get_initialized_slot(move |item| *item = value)
-            .map(|idx| tid.pack(idx))
+        self.create(|t| *t = value)
     }
 
     /// Return a reference to the value associated with the given key.

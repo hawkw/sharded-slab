@@ -83,23 +83,6 @@ impl<T, C> Shard<Option<T>, C>
 where
     C: cfg::Config,
 {
-    pub(crate) fn insert(&self, value: T) -> Option<usize> {
-        let mut value = Some(value);
-
-        // Can we fit the value into an existing page?
-        for (page_idx, page) in self.shared.iter().enumerate() {
-            let local = self.local(page_idx);
-
-            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
-
-            if let Some(poff) = page.insert(local, &mut value) {
-                return Some(poff);
-            }
-        }
-
-        None
-    }
-
     /// Remove an item on the shard's local thread.
     pub(crate) fn take_local(&self, idx: usize) -> Option<T> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
@@ -158,18 +141,18 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn get_initialized_slot(&self, f: impl FnOnce(&mut T)) -> Option<usize> {
-        let mut f = Some(f);
+    pub(crate) fn init_with<F>(&self, mut func: F) -> Option<usize>
+    where
+        F: FnMut(&page::slot::Slot<T, C>) -> Option<page::slot::Generation<C>>,
+    {
+        // Can we fit the value into an existing page?
         for (page_idx, page) in self.shared.iter().enumerate() {
             let local = self.local(page_idx);
 
             test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
-            if let offset @ Some(_) = page.get_initialized_slot(local, |x| {
-                let f = f.take().expect("initializer will not be called twice");
-                (f)(x)
-            }) {
-                return offset;
+            if let Some(poff) = page.init_with(local, &mut func) {
+                return Some(poff);
             }
         }
 

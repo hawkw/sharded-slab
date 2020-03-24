@@ -294,7 +294,7 @@ where
     /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
     /// only need to ensure that the `Slot` is in the right state, while when being used in a
     /// `Slab` we want to insert a value into it, as the memory is not initialized
-    pub(super) fn initialize_state(&self, mut f: impl FnMut(&mut T)) -> Option<Generation<C>> {
+    pub(crate) fn initialize_state(&self, f: impl FnOnce(&mut T)) -> Option<Generation<C>> {
         // Load the current lifecycle state.
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
         let gen = LifecycleGen::from_packed(lifecycle).0;
@@ -351,7 +351,7 @@ where
     ///
     /// We first initialize the state and then insert the pased in value into the slot.
     #[inline]
-    pub(super) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
+    pub(crate) fn insert(&self, value: &mut Option<T>) -> Option<Generation<C>> {
         debug_assert!(self.is_empty(), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
 

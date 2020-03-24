@@ -271,8 +271,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::<C>::current();
         test_println!("insert {:?}", tid);
+        let mut value = Some(value);
         self.shards[tid.as_usize()]
-            .insert(value)
+            .init_with(|slot| slot.insert(&mut value))
             .map(|idx| tid.pack(idx))
     }
 
