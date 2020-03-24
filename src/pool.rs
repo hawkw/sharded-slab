@@ -80,8 +80,9 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
+    /// let mut value = Some(String::from("Hello"));
     ///
-    /// let key = pool.create(|item| *item = "hello".to_string()).unwrap();
+    /// let key = pool.create(|item| *item = value.take().expect("created twice")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
     pub fn create(&self, mut initilizer: impl FnMut(&mut T)) -> Option<usize> {
@@ -92,14 +93,29 @@ where
             .map(|idx| tid.pack(idx))
     }
 
-    pub fn create_with(&self, value: T) -> Option<usize>
-    where
-        T: Clone,
-    {
+    /// Creates a new object in the pool, reusing storage if possible. This method returns a key
+    /// which can be used to access the storage.
+    ///
+    /// If this function returns `None`, then the shard for the current thread is full and no items
+    /// can be added until some are removed, or the maximum number of shards has been reached.
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// let pool: Pool<String> = Pool::new();
+    /// let value = String::from("Hello");
+    ///
+    /// let key = pool.create_with(value).unwrap();
+    /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    /// ```
+    pub fn create_with(&self, value: T) -> Option<usize> {
         let tid = Tid::<C>::current();
+        let mut value = Some(value);
         test_println!("pool: create_with {:?}", tid);
         self.shards[tid.as_usize()]
-            .get_initialized_slot(&mut move |item| *item = value.clone())
+            .get_initialized_slot(&mut move |item| {
+                *item = value.take().expect("value created twice")
+            })
             .map(|idx| tid.pack(idx))
     }
 
@@ -110,10 +126,12 @@ where
     /// # Examples
     ///
     /// ```rust
+    /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = sharded_slab::Pool::new();
-    /// let key = pool.create().unwrap();
+    /// let mut value = Some(String::from("hello world"));
+    /// let key = pool.create(move |item| *item = value.take().expect("crated twice")).unwrap();
     ///
-    /// assert_eq!(pool.get(key).unwrap(), String::from(""));
+    /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     /// assert!(pool.get(12345).is_none());
     /// ```
     pub fn get(&self, key: usize) -> Option<PoolGuard<'_, T, C>> {
@@ -139,6 +157,17 @@ where
     ///
     /// # Examples
     ///
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// let pool: Pool<String> = sharded_slab::Pool::new();
+    /// let mut value = Some(String::from("hello world"));
+    /// let key = pool.create(move |item| *item = value.take().expect("crated twice")).unwrap();
+    ///
+    /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+    ///
+    /// pool.clear(key);
+    /// assert!(pool.get(key).is_none());
+    /// ```
     /// [`clear`]: #method.clear
     pub fn clear(&self, key: usize) -> bool {
         let tid = C::unpack_tid(key);

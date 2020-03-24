@@ -20,7 +20,7 @@ impl PartialEq for State {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 struct DontDropMe(Arc<State>);
 
 impl PartialEq for DontDropMe {
