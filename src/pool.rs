@@ -80,9 +80,7 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let mut value = Some(String::from("Hello"));
-    ///
-    /// let key = pool.create(|item| *item = value.take().expect("created twice")).unwrap();
+    /// let key = pool.create(|item| item.push_str("Hello")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
     pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
