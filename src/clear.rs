@@ -1,4 +1,4 @@
-use std::{collections, hash, ops::DerefMut, sync, sync::Arc};
+use std::{collections, hash, ops::DerefMut, sync};
 
 pub trait Clear {
     /// Clear all data in `self`, retaining the allocated capacithy.

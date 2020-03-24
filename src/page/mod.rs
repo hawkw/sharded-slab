@@ -169,9 +169,9 @@ where
         self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
-    /// Initilizes the state of the new slot.
+    /// Initiliazes the state of the new slot.
     ///
-    /// It does this via the provided initilizatin function `func`. Once it get's the generation
+    /// It does this via the provided initializatin function `func`. Once it get's the generation
     /// number for the new slot, it performs the operations required to return the key to the
     /// caller.
     #[inline]
@@ -299,7 +299,7 @@ where
     C: cfg::Config,
 {
     #[inline]
-    pub(crate) fn get_initialized_slot(
+    pub(crate) fn initialized_slot(
         &self,
         local: &Local,
         f: impl FnMut(&mut T),
@@ -312,9 +312,9 @@ where
         }
 
         self.initialize_new_slot(head, |slab| {
-            // safety: we might be aliasing a shared reference to and an exclusive one, but since
-            // we only ever acceess the `head` of the list here and other threads only access the
-            // slots they have access to, we are safe.
+            // safety: we might be aliasing a shared reference to and an exclusive one. However,
+            // since we only ever access the `head` of the list here and other threads only access
+            // the slots they have access to, we are safe.
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");
@@ -346,26 +346,6 @@ where
         });
     }
 
-    pub(crate) fn clear<F>(
-        &self,
-        addr: Addr<C>,
-        gen: slot::Generation<C>,
-        free_list: &F,
-    ) -> Option<bool>
-    where
-        F: FreeList<C>,
-    {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> clear: offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref()?;
-            let slot = slab.get(offset)?;
-            Some(slot.clear_storage(gen, offset, free_list))
-        })
-    }
-
     pub(crate) fn mark_clear<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
@@ -379,8 +359,7 @@ where
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.try_clear_storage(gen, offset, free_list);
-                true
+                slot.try_clear_storage(gen, offset, free_list)
             } else {
                 false
             }

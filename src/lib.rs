@@ -183,7 +183,7 @@ macro_rules! test_println {
     }
 }
 
-pub mod clear;
+mod clear;
 pub mod implementation;
 mod page;
 pub mod pool;
@@ -214,7 +214,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// While the guard exists, it indicates to the slab that the item the guard
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
-pub struct SlabGuard<'a, T, C: cfg::Config = DefaultConfig> {
+pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<Option<T>, C>,
     key: usize,
@@ -320,10 +320,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     /// [`take`]: #method.take
     pub fn remove(&self, idx: usize) -> bool {
-        // The `Drop` impl for `SlabGuard` calls `remove_local` or `remove_remote` based
-        // on where the guard was dropped from, which in turn if the guard was the last
-        // one, would lead to the calling of `Slot::remove_value` which actually clears
-        // the storage.
+        // The `Drop` impl for `Guard` calls `remove_local` or `remove_remote` based
+        // on where the guard was dropped from. If the dropped guard was the last one, this will
+        // call `Slot::remove_value` which actually clears storage.
         let tid = C::unpack_tid(idx);
 
         test_println!("rm_deferred {:?}", tid);
@@ -408,7 +407,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// assert_eq!(slab.get(key).unwrap(), "hello world");
     /// assert!(slab.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<SlabGuard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
@@ -418,7 +417,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
             )
         })?;
 
-        Some(SlabGuard {
+        Some(Guard {
             inner,
             // Safe access as previous line checks for validity
             shard: &self.shards[tid.as_usize()],
@@ -475,16 +474,16 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
 unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
 unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
-// === impl SlabGuard ===
+// === impl Guard ===
 
-impl<'a, T, C: cfg::Config> SlabGuard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
         self.key
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
+impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -492,7 +491,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for SlabGuard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
         if self.inner.release() {
@@ -506,7 +505,7 @@ impl<'a, T, C: cfg::Config> Drop for SlabGuard<'a, T, C> {
     }
 }
 
-impl<'a, T, C> fmt::Debug for SlabGuard<'a, T, C>
+impl<'a, T, C> fmt::Debug for Guard<'a, T, C>
 where
     T: fmt::Debug,
     C: cfg::Config,
@@ -516,7 +515,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for SlabGuard<'a, T, C>
+impl<'a, T, C> PartialEq<T> for Guard<'a, T, C>
 where
     T: PartialEq<T>,
     C: cfg::Config,
