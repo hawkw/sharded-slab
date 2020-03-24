@@ -289,7 +289,7 @@ where
         }
     }
 
-    /// Initilize a slot
+    /// Initialize a slot
     ///
     /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
     /// only need to ensure that the `Slot` is in the right state, while when being used in a

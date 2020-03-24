@@ -89,7 +89,7 @@ where
         let tid = Tid::<C>::current();
         test_println!("pool: create {:?}", tid);
         self.shards[tid.as_usize()]
-            .get_initialized_slot(&mut initilizer)
+            .initialized_slot(&mut initilizer)
             .map(|idx| tid.pack(idx))
     }
 
@@ -113,7 +113,7 @@ where
         let mut value = Some(value);
         test_println!("pool: create_with {:?}", tid);
         self.shards[tid.as_usize()]
-            .get_initialized_slot(&mut move |item| {
+            .initialized_slot(&mut move |item| {
                 *item = value.take().expect("value created twice")
             })
             .map(|idx| tid.pack(idx))

@@ -169,9 +169,9 @@ where
         self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
-    /// Initilizes the state of the new slot.
+    /// Initiliazes the state of the new slot.
     ///
-    /// It does this via the provided initilizatin function `func`. Once it get's the generation
+    /// It does this via the provided initializatin function `func`. Once it get's the generation
     /// number for the new slot, it performs the operations required to return the key to the
     /// caller.
     #[inline]
@@ -299,7 +299,7 @@ where
     C: cfg::Config,
 {
     #[inline]
-    pub(crate) fn get_initialized_slot(
+    pub(crate) fn initialized_slot(
         &self,
         local: &Local,
         f: &mut dyn FnMut(&mut T),
@@ -312,9 +312,9 @@ where
         }
 
         self.initialize_new_slot(head, |slab| {
-            // safety: we might be aliasing a shared reference to and an exclusive one, but since
-            // we only ever acceess the `head` of the list here and other threads only access the
-            // slots they have access to, we are safe.
+            // safety: we might be aliasing a shared reference to and an exclusive one. However,
+            // since we only ever access the `head` of the list here and other threads only access
+            // the slots they have access to, we are safe.
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");

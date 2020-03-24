@@ -158,13 +158,13 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn get_initialized_slot(&self, f: &mut dyn FnMut(&mut T)) -> Option<usize> {
+    pub(crate) fn initialized_slot(&self, f: &mut dyn FnMut(&mut T)) -> Option<usize> {
         for (page_idx, page) in self.shared.iter().enumerate() {
             let local = self.local(page_idx);
 
             test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
-            if let offset @ Some(_) = page.get_initialized_slot(local, f) {
+            if let offset @ Some(_) = page.initialized_slot(local, f) {
                 return offset;
             }
         }
