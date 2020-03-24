@@ -302,7 +302,7 @@ where
     pub(crate) fn initialized_slot(
         &self,
         local: &Local,
-        f: &mut dyn FnMut(&mut T),
+        f: impl FnMut(&mut T),
     ) -> Option<usize> {
         let head = self.get_head(local)?;
 

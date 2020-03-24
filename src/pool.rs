@@ -85,11 +85,11 @@ where
     /// let key = pool.create(|item| *item = value.take().expect("created twice")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
-    pub fn create(&self, mut initilizer: impl FnMut(&mut T)) -> Option<usize> {
+    pub fn create(&self, initilizer: impl FnOnce(&mut T)) -> Option<usize> {
         let tid = Tid::<C>::current();
         test_println!("pool: create {:?}", tid);
         self.shards[tid.as_usize()]
-            .initialized_slot(&mut initilizer)
+            .get_initialized_slot(initilizer)
             .map(|idx| tid.pack(idx))
     }
 
@@ -113,9 +113,7 @@ where
         let mut value = Some(value);
         test_println!("pool: create_with {:?}", tid);
         self.shards[tid.as_usize()]
-            .initialized_slot(&mut move |item| {
-                *item = value.take().expect("value created twice")
-            })
+            .get_initialized_slot(move |item| *item = value)
             .map(|idx| tid.pack(idx))
     }
 

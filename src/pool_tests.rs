@@ -60,10 +60,10 @@ fn pool_dont_drop() {
         let pool: Pool<DontDropMe> = Pool::new();
         let (item1, value) = DontDropMe::new(1);
         test_println!("-> dont_drop: Inserting into pool {}", item1.id);
-        let mut value = Some(value);
-        let idx = pool
-            .create(move |item| *item = value.take().expect("Value created twice"))
-            .expect("Create");
+        let idx = pool.create(move |item| *item = value).expect("Create");
+
+        assert!(!item1.is_dropped.load(Ordering::SeqCst));
+        assert!(!item1.is_cleared.load(Ordering::SeqCst));
 
         test_println!("-> dont_drop: clearing idx: {}", idx);
         pool.clear(idx);
@@ -80,12 +80,7 @@ fn pool_concurrent_create_clear() {
         let pair = Arc::new((Mutex::new(None), Condvar::new()));
 
         let (item1, value) = DontDropMe::new(1);
-
-        let mut value = Some(value);
-        let idx1 = pool
-            .create(move |item| *item = value.take().expect("value created twice"))
-            .expect("Create");
-
+        let idx1 = pool.create(move |item| *item = value).expect("Create");
         let p = pool.clone();
         let pair2 = pair.clone();
         let test_value = item1.clone();
@@ -109,8 +104,6 @@ fn pool_concurrent_create_clear() {
 
         assert!(!item1.is_dropped.load(Ordering::SeqCst));
         assert!(!item1.is_cleared.load(Ordering::SeqCst));
-
-        assert_eq!(guard.unwrap().0.id, item1.id);
 
         t1.join().expect("thread 1 unable to join");
 
