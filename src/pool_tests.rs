@@ -60,8 +60,9 @@ fn dont_drop() {
         let pool: Pool<DontDropMe> = Pool::new();
         let (item1, value) = DontDropMe::new(1);
         test_println!("-> dont_drop: Inserting into pool {}", item1.id);
+        let mut value = Some(value);
         let idx = pool
-            .create(move |item| *item = value.clone())
+            .create(move |item| *item = value.take().expect("Value created twice"))
             .expect("Create");
 
         test_println!("-> dont_drop: clearing idx: {}", idx);
@@ -78,8 +79,9 @@ fn dont_drop_across_threads() {
         let pool: Arc<Pool<DontDropMe>> = Arc::new(Pool::new());
 
         let (item1, value) = DontDropMe::new(1);
+        let mut value = Some(value);
         let idx1 = pool
-            .create(move |item| *item = value.clone())
+            .create(move |item| *item = value.take().expect("value created twice"))
             .expect("Create");
 
         let p = pool.clone();
@@ -89,7 +91,7 @@ fn dont_drop_across_threads() {
         });
 
         assert!(!item1.is_dropped.load(Ordering::SeqCst));
-        assert!(item1.is_cleared.load(Ordering::SeqCst));
+        assert!(!item1.is_cleared.load(Ordering::SeqCst));
 
         t1.join().expect("thread 1 unable to join");
         pool.clear(idx1);
