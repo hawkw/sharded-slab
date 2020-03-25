@@ -292,6 +292,8 @@ impl<T, C: cfg::Config> Slot<T, C> {
     ) -> Option<T> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut advanced = false;
+        // Exponential spin backoff while waiting for the slot to be released.
+        let mut spin_exp = 0;
         let next_gen = gen.advance();
         loop {
             let current_gen = Generation::from_packed(lifecycle);
@@ -301,6 +303,7 @@ impl<T, C: cfg::Config> Slot<T, C> {
                 current_gen,
                 next_gen
             );
+
             // First, make sure we are actually able to remove the value.
             // If we're going to remove the value, the generation has to match
             // the value that `remove_value` was called with...unless we've
@@ -334,11 +337,15 @@ impl<T, C: cfg::Config> Slot<T, C> {
                     // Otherwise, a reference must be dropped before we can
                     // remove the value. Spin here until there are no refs remaining...
                     test_println!("-> refs={:?}; spin...", refs);
-                    atomic::spin_loop_hint();
+
+                    // Back off, spinning and possibly yielding.
+                    exponential_backoff(&mut spin_exp);
                 }
                 Err(actual) => {
                     test_println!("-> retrying; lifecycle={:#x};", actual);
                     lifecycle = actual;
+                    // The state changed; reset the spin backoff.
+                    spin_exp = 0;
                 }
             }
         }
@@ -600,5 +607,27 @@ impl<C: cfg::Config> Pack<C> for LifecycleGen<C> {
 
     fn as_usize(&self) -> usize {
         self.0.as_usize()
+    }
+}
+
+// === helpers ===
+
+#[inline(always)]
+fn exponential_backoff(exp: &mut usize) {
+    /// Maximum exponent we can back off to.
+    const MAX_EXPONENT: usize = 8;
+
+    // Issue 2^exp pause instructions.
+    for _ in 0..(1 << *exp) {
+        atomic::spin_loop_hint();
+    }
+
+    if *exp >= MAX_EXPONENT {
+        // If we have reached the max backoff, also yield to the scheduler
+        // explicitly.
+        crate::sync::yield_now();
+    } else {
+        // Otherwise, increment the exponent.
+        *exp += 1;
     }
 }
