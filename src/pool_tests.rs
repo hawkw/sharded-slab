@@ -1,4 +1,8 @@
-use crate::{clear::Clear, tests::util::*, Pool};
+use crate::{
+    clear::Clear,
+    tests::{util::*, TinyConfig},
+    Pool,
+};
 use loom::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -12,6 +16,7 @@ struct State {
     is_dropped: AtomicBool,
     is_cleared: AtomicBool,
     id: usize,
+    storage: String,
 }
 
 impl State {
@@ -42,10 +47,10 @@ impl DontDropMe {
             is_dropped: AtomicBool::new(false),
             is_cleared: AtomicBool::new(false),
             id,
+            storage: String::new(),
         });
         (state.clone(), Self(state))
     }
-
 }
 
 impl Drop for DontDropMe {
@@ -147,5 +152,36 @@ fn pool_racy_clear() {
         assert!(r1 || r2, "One thread should have removed the value");
         assert!(pool.get(idx).is_none());
         item.assert_not_clear();
+    })
+}
+
+#[test]
+fn pool_clear_local_and_reuse() {
+    run_model("pool_take_remote_and_reuse", || {
+        let pool = Arc::new(Pool::new_with_config::<TinyConfig>());
+
+        let idx1 = pool
+            .create_with(move |item: &mut String| {
+                item.push_str("hello world");
+            })
+            .expect("create");
+        let idx2 = pool
+            .create_with(move |item| item.push_str("foo"))
+            .expect("create");
+        let idx3 = pool
+            .create_with(move |item| item.push_str("bar"))
+            .expect("create");
+
+        assert_eq!(pool.get(idx1).unwrap(), String::from("hello world"));
+        assert_eq!(pool.get(idx2).unwrap(), String::from("foo"));
+        assert_eq!(pool.get(idx3).unwrap(), String::from("bar"));
+
+        assert!(pool.clear(idx1));
+
+        let idx1 = pool
+            .create_with(move |item| item.push_str("h"))
+            .expect("create");
+
+        assert!(pool.get(idx1).unwrap().capacity() >= 11);
     })
 }

@@ -63,8 +63,10 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, C> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<Option<T>, C>>, fn(&'a Slot<Option<T>, C>) -> Option<&'a T>>;
+pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
+    std::slice::Iter<'a, Slot<Option<T>, C>>,
+    fn(&'a Slot<Option<T>, C>) -> Option<&'a T>,
+>;
 
 pub(crate) struct Local {
     /// Index of the first slot on the local free list
@@ -301,10 +303,9 @@ where
         slab.extend((1..self.size).map(Slot::new));
         slab.push(Slot::new(Self::NULL));
         self.slab.with_mut(|s| {
-            // this mut access is safe — it only occurs to initially
-            // allocate the page, which only happens on this thread; if the
-            // page has not yet been allocated, other threads will not try
-            // to access it yet.
+            // safety: this mut access is safe — it only occurs to initially allocate the page,
+            // which only happens on this thread; if the page has not yet been allocated, other
+            // threads will not try to access it yet.
             unsafe {
                 *s = Some(slab.into_boxed_slice());
             }
