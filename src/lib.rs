@@ -178,7 +178,7 @@ macro_rules! thread_local {
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if cfg!(test) && cfg!(slab_print) {
-            println!("{:?} {}:{} {}", crate::Tid::<crate::DefaultConfig>::current(), file!(), line!(), format_args!($($arg)*))
+            println!("[{:?} {}:{}] {}", crate::Tid::<crate::DefaultConfig>::current(), file!(), line!(), format_args!($($arg)*))
         }
     }
 }
@@ -412,7 +412,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
-        let inner = self.shards.get(tid.as_usize())?.get(key, |x| {
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get(key, |x| {
             x.as_ref().expect(
                 "if a slot can be accessed at the current generation, its value must be `Some`",
             )
@@ -421,7 +422,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
         Some(Guard {
             inner,
             // Safe access as previous line checks for validity
-            shard: &self.shards[tid.as_usize()],
+            shard,
             key,
         })
     }

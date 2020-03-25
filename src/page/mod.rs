@@ -63,17 +63,18 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-type RefMaker<'a, T, C> = fn(&'a Slot<Option<T>, C>) -> Option<&'a T>;
-
 pub(crate) type Iter<'a, T, C> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<Option<T>, C>>, RefMaker<'a, T, C>>;
+    std::iter::FilterMap<std::slice::Iter<'a, Slot<Option<T>, C>>, fn(&'a Slot<Option<T>, C>) -> Option<&'a T>>;
 
 pub(crate) struct Local {
-    // index of the first slot on the local free list
+    /// Index of the first slot on the local free list
     head: CausalCell<usize>,
 }
 
 pub(crate) struct Shared<T, C> {
+    /// The remote free list
+    ///
+    /// This is where remote frees are pushed onto.
     remote: stack::TransferStack<C>,
     // tracks the size of the local free_list by keeping the index of the current position of the
     // start of the local free list. If local.head() > size, it means that the local free_list if
@@ -249,8 +250,7 @@ where
         let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
         slab.map(|slab| {
             slab.iter()
-                // RefMaker is a function pointer.
-                .filter_map(Shared::make_ref as RefMaker<'a, T, C>)
+                .filter_map(Shared::make_ref as fn(&'a Slot<Option<T>, C>) -> Option<&'a T>)
         })
     }
 }

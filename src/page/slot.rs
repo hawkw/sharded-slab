@@ -422,12 +422,12 @@ where
         free: &F,
     ) -> bool {
         if self.mark_release(gen) {
-            false
-        } else {
-            // Otherwise, we can remove the slot now!
-            test_println!("-> try_clear_storage; can remove now");
-            self.clear_storage(gen, offset, free)
+            return false;
         }
+
+        // Otherwise, we can remove the slot now!
+        test_println!("-> try_clear_storage; can remove now");
+        self.clear_storage(gen, offset, free)
     }
 
     /// Clear this slot's storage

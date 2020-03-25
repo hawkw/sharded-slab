@@ -14,6 +14,13 @@ struct State {
     id: usize,
 }
 
+impl State {
+    fn assert_not_clear(&self) {
+        assert!(!self.is_dropped.load(Ordering::SeqCst));
+        assert!(self.is_cleared.load(Ordering::SeqCst));
+    }
+}
+
 impl PartialEq for State {
     fn eq(&self, other: &State) -> bool {
         self.id.eq(&other.id)
@@ -38,6 +45,7 @@ impl DontDropMe {
         });
         (state.clone(), Self(state))
     }
+
 }
 
 impl Drop for DontDropMe {
@@ -60,7 +68,7 @@ fn pool_dont_drop() {
         let pool: Pool<DontDropMe> = Pool::new();
         let (item1, value) = DontDropMe::new(1);
         test_println!("-> dont_drop: Inserting into pool {}", item1.id);
-        let idx = pool.create(move |item| *item = value).expect("Create");
+        let idx = pool.create_with(move |item| *item = value).expect("Create");
 
         assert!(!item1.is_dropped.load(Ordering::SeqCst));
         assert!(!item1.is_cleared.load(Ordering::SeqCst));
@@ -68,8 +76,7 @@ fn pool_dont_drop() {
         test_println!("-> dont_drop: clearing idx: {}", idx);
         pool.clear(idx);
 
-        assert!(!item1.is_dropped.load(Ordering::SeqCst));
-        assert!(item1.is_cleared.load(Ordering::SeqCst));
+        item1.assert_not_clear();
     });
 }
 
@@ -80,18 +87,20 @@ fn pool_concurrent_create_clear() {
         let pair = Arc::new((Mutex::new(None), Condvar::new()));
 
         let (item1, value) = DontDropMe::new(1);
-        let idx1 = pool.create(move |item| *item = value).expect("Create");
+        let idx1 = pool.create_with(move |item| *item = value).expect("Create");
         let p = pool.clone();
         let pair2 = pair.clone();
         let test_value = item1.clone();
         let t1 = thread::spawn(move || {
             let (lock, cvar) = &*pair2;
+            test_println!("-> making get request");
             assert_eq!(p.get(idx1).unwrap().0.id, test_value.id);
             let mut next = lock.lock().unwrap();
             *next = Some(());
             cvar.notify_one();
         });
 
+        test_println!("-> making get request");
         let guard = pool.get(idx1);
 
         let (lock, cvar) = &*pair;
@@ -107,8 +116,8 @@ fn pool_concurrent_create_clear() {
 
         t1.join().expect("thread 1 unable to join");
 
-        assert!(!item1.is_dropped.load(Ordering::SeqCst));
-        assert!(item1.is_cleared.load(Ordering::SeqCst));
+        drop(guard);
+        item1.assert_not_clear();
     })
 }
 
@@ -120,7 +129,7 @@ fn pool_racy_clear() {
 
         let mut value = Some(value);
         let idx = pool
-            .create(move |item| *item = value.take().expect("value created twice"))
+            .create_with(move |item| *item = value.take().expect("value created twice"))
             .expect("Create");
         assert_eq!(pool.get(idx).unwrap().0.id, item.id);
 
@@ -137,7 +146,6 @@ fn pool_racy_clear() {
         );
         assert!(r1 || r2, "One thread should have removed the value");
         assert!(pool.get(idx).is_none());
-        assert!(!item.is_dropped.load(Ordering::SeqCst));
-        assert!(item.is_cleared.load(Ordering::SeqCst));
+        item.assert_not_clear();
     })
 }

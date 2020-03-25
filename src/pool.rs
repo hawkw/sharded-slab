@@ -80,10 +80,10 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create(|item| item.push_str("Hello")).unwrap();
+    /// let key = pool.create_with(|item| item.push_str("Hello")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
-    pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
+    pub fn create_with(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
         let tid = Tid::<C>::current();
         let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
@@ -93,25 +93,6 @@ where
                 slot.initialize_state(init)
             })
             .map(|idx| tid.pack(idx))
-    }
-
-    /// Creates a new object in the pool, reusing storage if possible. This method returns a key
-    /// which can be used to access the storage.
-    ///
-    /// If this function returns `None`, then the shard for the current thread is full and no items
-    /// can be added until some are removed, or the maximum number of shards has been reached.
-    ///
-    /// # Examples
-    /// ```rust
-    /// # use sharded_slab::Pool;
-    /// let pool: Pool<String> = Pool::new();
-    /// let value = String::from("Hello");
-    ///
-    /// let key = pool.create_with(value).unwrap();
-    /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
-    /// ```
-    pub fn create_with(&self, value: T) -> Option<usize> {
-        self.create(|t| *t = value)
     }
 
     /// Return a reference to the value associated with the given key.
@@ -143,18 +124,18 @@ where
         })
     }
 
-    /// Remove the value using the storage associated with the given key from the pool, reutrning
+    /// Remove the value using the storage associated with the given key from the pool, returning
     /// `true` if the value was removed.
     ///
-    /// Unlike [`clear`], this method does _not_ block the current thread until the value can be
-    /// removed. Instead, if another thread is currently accessing that value, this marks it to be
-    /// removed by that thread when it finishes accessing the value.
+    /// This method does _not_ block the current thread until the value can be
+    /// cleared. Instead, if another thread is currently accessing that value, this marks it to be
+    /// cleared by that thread when it is done accessing that value.
     ///
     /// # Examples
     ///
     /// ```rust
     /// # use sharded_slab::Pool;
-    /// let pool: Pool<String> = sharded_slab::Pool::new();
+    /// let pool: Pool<String> = Pool::new();
     /// let mut value = Some(String::from("hello world"));
     /// let key = pool.create(move |item| *item = value.take().expect("crated twice")).unwrap();
     ///
@@ -162,6 +143,22 @@ where
     ///
     /// pool.clear(key);
     /// assert!(pool.get(key).is_none());
+    /// ```
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// let pool: Pool<String> = Pool::new();
+    ///
+    /// let key = pool.create(|item| item.push_str("Hello world!")).unwrap();
+    ///
+    /// // Clearing a key that doesn't exist in the `Pool` will return `false`
+    /// assert_eq!(pool.clear(key + 69420), false);
+    ///
+    /// // Clearing a key that does exist returns `true`
+    /// assert!(pool.clear(key));
+    ///
+    /// // Clearing a key that has previously been cleared will return `false`
+    /// assert_eq!(pool.clear(key), false);
     /// ```
     /// [`clear`]: #method.clear
     pub fn clear(&self, key: usize) -> bool {
