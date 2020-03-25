@@ -169,24 +169,6 @@ where
         self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
-    /// Initiliazes the state of the new slot.
-    ///
-    /// It does this via the provided initializatin function `func`. Once it get's the generation
-    /// number for the new slot, it performs the operations required to return the key to the
-    /// caller.
-    #[inline]
-    fn initialize_new_slot<F>(&self, head: usize, func: F) -> Option<usize>
-    where
-        F: FnOnce(*const Option<Slots<T, C>>) -> Option<slot::Generation<C>>,
-    {
-        let gen = self.slab.with(func)?;
-
-        let index = head + self.prev_sz;
-
-        test_println!("-> initialize_new_slot: insert at offset: {}", index);
-        Some(gen.pack(index))
-    }
-
     #[inline]
     pub(crate) fn get<U>(
         &self,
@@ -216,26 +198,6 @@ impl<'a, T, C> Shared<Option<T>, C>
 where
     C: cfg::Config + 'a,
 {
-    #[inline]
-    pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
-        let head = self.get_head(local)?;
-
-        // do we need to allocate storage for this page?
-        if self.is_unallocated() {
-            self.allocate();
-        }
-
-        self.initialize_new_slot(head, |slab| {
-            let slab = unsafe { &*(slab) }
-                .as_ref()
-                .expect("page must have been allocated to insert!");
-            let slot = &slab[head];
-            let gen = slot.insert(t);
-            local.set_head(slot.next());
-            gen
-        })
-    }
-
     pub(crate) fn take<F>(
         &self,
         addr: Addr<C>,
@@ -298,12 +260,15 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    #[inline]
-    pub(crate) fn initialized_slot(
-        &self,
-        local: &Local,
-        f: impl FnMut(&mut T),
-    ) -> Option<usize> {
+    /// Allocate and initialize a new slot.
+    ///
+    /// It does this via the provided initializatin function `func`. Once it get's the generation
+    /// number for the new slot, it performs the operations required to return the key to the
+    /// caller.]
+    pub(crate) fn init_with<F>(&self, local: &Local, func: F) -> Option<usize>
+    where
+        F: FnOnce(&Slot<T, C>) -> Option<slot::Generation<C>>,
+    {
         let head = self.get_head(local)?;
 
         // do we need to allocate storage for this page?
@@ -311,19 +276,19 @@ where
             self.allocate();
         }
 
-        self.initialize_new_slot(head, |slab| {
-            // safety: we might be aliasing a shared reference to and an exclusive one. However,
-            // since we only ever access the `head` of the list here and other threads only access
-            // the slots they have access to, we are safe.
+        let gen = self.slab.with(|slab| {
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");
             let slot = &slab[head];
-            let gen = slot.initialize_state(f);
             local.set_head(slot.next());
+            func(slot)
+        })?;
 
-            gen
-        })
+        let index = head + self.prev_sz;
+
+        test_println!("-> initialize_new_slot: insert at offset: {}", index);
+        Some(gen.pack(index))
     }
 
     /// Allocates storage for the page's slots.
