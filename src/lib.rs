@@ -366,10 +366,17 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// If the slab does not contain a value for that key, `None` is returned
     /// instead.
     ///
-    /// **Note**: If the value associated with the given key is currently being
+    /// If the value associated with the given key is currently being
     /// accessed by another thread, this method will block the current thread
     /// until the item is no longer accessed. If this is not desired, use
     /// [`remove`] instead.
+    ///
+    /// **Note**: This method blocks the calling thread by spinning until the
+    /// currently outstanding references are released. Spinning for long periods
+    /// of time can result in high CPU time and power consumption. Therefore,
+    /// `take` should only be called when other references to the slot are
+    /// expected to be dropped soon (e.g., when all accesses are relatively
+    /// short).
     ///
     /// # Examples
     ///
