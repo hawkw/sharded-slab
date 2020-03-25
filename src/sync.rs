@@ -7,12 +7,15 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
+
+    pub(crate) use loom::thread::yield_now;
 }
 
 #[cfg(not(test))]
 mod inner {
     use std::cell::UnsafeCell;
     pub(crate) use std::sync::atomic;
+    pub(crate) use std::thread::yield_now;
 
     #[derive(Debug)]
     pub struct CausalCell<T>(UnsafeCell<T>);
