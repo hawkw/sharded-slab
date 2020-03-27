@@ -1,4 +1,5 @@
 use crate::cfg::{self, CfgPrivate};
+use crate::clear::Clear;
 use crate::sync::CausalCell;
 use crate::Pack;
 
@@ -39,7 +40,9 @@ impl<C: cfg::Config> Addr<C> {
 }
 
 pub(crate) trait FreeList<C> {
-    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>);
+    fn push<T>(&self, new_head: usize, slot: &Slot<T, C>)
+    where
+        C: cfg::Config;
 }
 
 impl<C: cfg::Config> Pack<C> for Addr<C> {
@@ -60,15 +63,26 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, C> =
-    std::iter::FilterMap<std::slice::Iter<'a, Slot<T, C>>, fn(&'a Slot<T, C>) -> Option<&'a T>>;
+pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
+    std::slice::Iter<'a, Slot<Option<T>, C>>,
+    fn(&'a Slot<Option<T>, C>) -> Option<&'a T>,
+>;
 
 pub(crate) struct Local {
+    /// Index of the first slot on the local free list
     head: CausalCell<usize>,
 }
 
 pub(crate) struct Shared<T, C> {
+    /// The remote free list
+    ///
+    /// Slots freed from a remote thread are pushed onto this list.
     remote: stack::TransferStack<C>,
+    // Total size of the page.
+    //
+    // If the head index of the local or remote free list is greater than the size of the
+    // page, then that free list is emtpy. If the head of both free lists is greater than `size`
+    // then there are no slots left in that page.
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Slots<T, C>>>,
@@ -103,7 +117,10 @@ impl<C: cfg::Config> FreeList<C> for Local {
     }
 }
 
-impl<T, C: cfg::Config> Shared<T, C> {
+impl<T, C> Shared<T, C>
+where
+    C: cfg::Config,
+{
     const NULL: usize = Addr::<C>::NULL;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
@@ -115,35 +132,15 @@ impl<T, C: cfg::Config> Shared<T, C> {
         }
     }
 
-    /// Returns `true` if storage is currently allocated for this page, `false`
-    /// otherwise.
+    /// Return the head of the freelist
+    ///
+    /// If there is space on the local list, it returns the head of the local list. Otherwise, it
+    /// pops all the slots from the global list and returns the head of that list
+    ///
+    /// *Note*: The local list's head is reset when setting the new state in the slot pointed to be
+    /// `head` returned from this function
     #[inline]
-    fn is_unallocated(&self) -> bool {
-        self.slab.with(|s| unsafe { (*s).is_none() })
-    }
-
-    /// Allocates storage for the page's slots.
-    #[cold]
-    fn allocate(&self) {
-        test_println!("-> alloc new page ({})", self.size);
-        debug_assert!(self.is_unallocated());
-
-        let mut slab = Vec::with_capacity(self.size);
-        slab.extend((1..self.size).map(Slot::new));
-        slab.push(Slot::new(Self::NULL));
-        self.slab.with_mut(|s| {
-            // this mut access is safe — it only occurs to initially
-            // allocate the page, which only happens on this thread; if the
-            // page has not yet been allocated, other threads will not try
-            // to access it yet.
-            unsafe {
-                *s = Some(slab.into_boxed_slice());
-            }
-        });
-    }
-
-    #[inline]
-    pub(crate) fn insert(&self, local: &Local, t: &mut Option<T>) -> Option<usize> {
+    fn pop(&self, local: &Local) -> Option<usize> {
         let head = local.head();
 
         test_println!("-> local head {:?}", head);
@@ -152,8 +149,8 @@ impl<T, C: cfg::Config> Shared<T, C> {
         let head = if head < self.size {
             head
         } else {
-            // if the local free list is empty, pop all the items on the remote
-            // free list onto the local free list.
+            // slow path: if the local free list is empty, pop all the items on
+            // the remote free list.
             let head = self.remote.pop_all();
 
             test_println!("-> remote head {:?}", head);
@@ -164,32 +161,26 @@ impl<T, C: cfg::Config> Shared<T, C> {
         // empty --- we can't fit any more items on this page.
         if head == Self::NULL {
             test_println!("-> NULL! {:?}", head);
-            return None;
+            None
+        } else {
+            Some(head)
         }
+    }
 
-        // do we need to allocate storage for this page?
-        if self.is_unallocated() {
-            self.allocate();
-        }
-
-        let gen = self.slab.with(|slab| {
-            let slab = unsafe { &*(slab) }
-                .as_ref()
-                .expect("page must have been allocated to insert!");
-            let slot = &slab[head];
-            let gen = slot.insert(t);
-            local.set_head(slot.next());
-            gen
-        })?;
-
-        let index = head + self.prev_sz;
-
-        test_println!("insert at offset: {}", index);
-        Some(gen.pack(index))
+    /// Returns `true` if storage is currently allocated for this page, `false`
+    /// otherwise.
+    #[inline]
+    fn is_unallocated(&self) -> bool {
+        self.slab.with(|s| unsafe { (*s).is_none() })
     }
 
     #[inline]
-    pub(crate) fn get(&self, addr: Addr<C>, idx: usize) -> Option<slot::Guard<'_, T, C>> {
+    pub(crate) fn get<U>(
+        &self,
+        addr: Addr<C>,
+        idx: usize,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<slot::Guard<'_, U, C>> {
         let poff = addr.offset() - self.prev_sz;
 
         test_println!("-> offset {:?}", poff);
@@ -198,30 +189,20 @@ impl<T, C: cfg::Config> Shared<T, C> {
             unsafe { &*slab }
                 .as_ref()?
                 .get(poff)?
-                .get(C::unpack_gen(idx))
+                .get(C::unpack_gen(idx), f)
         })
     }
 
-    pub(crate) fn remove<F: FreeList<C>>(
-        &self,
-        addr: Addr<C>,
-        gen: slot::Generation<C>,
-        free_list: &F,
-    ) -> bool {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref();
-            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.remove(gen, offset, free_list)
-            } else {
-                false
-            }
-        })
+    #[inline(always)]
+    pub(crate) fn free_list(&self) -> &impl FreeList<C> {
+        &self.remote
     }
+}
 
+impl<'a, T, C> Shared<Option<T>, C>
+where
+    C: cfg::Config + 'a,
+{
     pub(crate) fn take<F>(
         &self,
         addr: Addr<C>,
@@ -242,14 +223,115 @@ impl<T, C: cfg::Config> Shared<T, C> {
         })
     }
 
-    pub(crate) fn iter(&self) -> Option<Iter<'_, T, C>> {
-        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
-        slab.map(|slab| slab.iter().filter_map(Slot::value as fn(_) -> _))
+    pub(crate) fn remove<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
+        let offset = addr.offset() - self.prev_sz;
+
+        test_println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.try_remove_value(gen, offset, free_list);
+                true
+            } else {
+                false
+            }
+        })
     }
 
-    #[inline(always)]
-    pub(crate) fn free_list(&self) -> &impl FreeList<C> {
-        &self.remote
+    // Need this function separately, as we need to pass a function pointer to `filter_map` and
+    // `Slot::value` just returns a `&T`, specifically a `&Option<T>` for this impl.
+    fn make_ref(slot: &'a Slot<Option<T>, C>) -> Option<&'a T> {
+        slot.value().as_ref()
+    }
+
+    pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| {
+            slab.iter()
+                .filter_map(Shared::make_ref as fn(&'a Slot<Option<T>, C>) -> Option<&'a T>)
+        })
+    }
+}
+
+impl<T, C> Shared<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Allocate and initialize a new slot.
+    ///
+    /// It does this via the provided initializatin function `func`. Once it get's the generation
+    /// number for the new slot, it performs the operations required to return the key to the
+    /// caller.]
+    pub(crate) fn init_with<F>(&self, local: &Local, func: F) -> Option<usize>
+    where
+        F: FnOnce(&Slot<T, C>) -> Option<slot::Generation<C>>,
+    {
+        let head = self.pop(local)?;
+
+        // do we need to allocate storage for this page?
+        if self.is_unallocated() {
+            self.allocate();
+        }
+
+        let gen = self.slab.with(|slab| {
+            let slab = unsafe { &*(slab) }
+                .as_ref()
+                .expect("page must have been allocated to insert!");
+            let slot = &slab[head];
+            local.set_head(slot.next());
+            func(slot)
+        })?;
+
+        let index = head + self.prev_sz;
+
+        test_println!("-> initialize_new_slot: insert at offset: {}", index);
+        Some(gen.pack(index))
+    }
+
+    /// Allocates storage for the page's slots.
+    #[cold]
+    fn allocate(&self) {
+        test_println!("-> alloc new page ({})", self.size);
+        debug_assert!(self.is_unallocated());
+
+        let mut slab = Vec::with_capacity(self.size);
+        slab.extend((1..self.size).map(Slot::new));
+        slab.push(Slot::new(Self::NULL));
+        self.slab.with_mut(|s| {
+            // safety: this mut access is safe — it only occurs to initially allocate the page,
+            // which only happens on this thread; if the page has not yet been allocated, other
+            // threads will not try to access it yet.
+            unsafe {
+                *s = Some(slab.into_boxed_slice());
+            }
+        });
+    }
+
+    pub(crate) fn mark_clear<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
+        let offset = addr.offset() - self.prev_sz;
+
+        test_println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.try_clear_storage(gen, offset, free_list)
+            } else {
+                false
+            }
+        })
     }
 }
 

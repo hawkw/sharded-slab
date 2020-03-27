@@ -178,28 +178,34 @@ macro_rules! thread_local {
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if cfg!(test) && cfg!(slab_print) {
-            println!("{:?} {}", crate::Tid::<crate::DefaultConfig>::current(), format_args!($($arg)*))
+            println!("[{:?} {}:{}] {}", crate::Tid::<crate::DefaultConfig>::current(), file!(), line!(), format_args!($($arg)*))
         }
     }
 }
 
+mod clear;
 pub mod implementation;
 mod page;
+pub mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
 pub(crate) mod cfg;
 mod iter;
+mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 
+pub use pool::Pool;
+
+use shard::Shard;
 use std::{fmt, marker::PhantomData};
 
 /// A sharded slab.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
 pub struct Slab<T, C: cfg::Config = DefaultConfig> {
-    shards: Box<[Shard<T, C>]>,
+    shards: Box<[Shard<Option<T>, C>]>,
     _cfg: PhantomData<C>,
 }
 
@@ -210,43 +216,8 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, T, C>,
-    shard: &'a Shard<T, C>,
+    shard: &'a Shard<Option<T>, C>,
     key: usize,
-}
-
-// ┌─────────────┐      ┌────────┐
-// │ page 1      │      │        │
-// ├─────────────┤ ┌───▶│  next──┼─┐
-// │ page 2      │ │    ├────────┤ │
-// │             │ │    │XXXXXXXX│ │
-// │ local_free──┼─┘    ├────────┤ │
-// │ global_free─┼─┐    │        │◀┘
-// ├─────────────┤ └───▶│  next──┼─┐
-// │   page 3    │      ├────────┤ │
-// └─────────────┘      │XXXXXXXX│ │
-//       ...            ├────────┤ │
-// ┌─────────────┐      │XXXXXXXX│ │
-// │ page n      │      ├────────┤ │
-// └─────────────┘      │        │◀┘
-//                      │  next──┼───▶
-//                      ├────────┤
-//                      │XXXXXXXX│
-//                      └────────┘
-//                         ...
-struct Shard<T, C: cfg::Config> {
-    /// The shard's parent thread ID.
-    tid: usize,
-    /// The local free list for each page.
-    ///
-    /// These are only ever accessed from this shard's thread, so they are
-    /// stored separately from the shared state for the page that can be
-    /// accessed concurrently, to minimize false sharing.
-    local: Box<[page::Local]>,
-    /// The shared state for each page in this shard.
-    ///
-    /// This consists of the page's metadata (size, previous size), remote free
-    /// list, and a pointer to the actual array backing that page.
-    shared: Box<[page::Shared<T, C>]>,
 }
 
 impl<T> Slab<T> {
@@ -300,8 +271,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
     pub fn insert(&self, value: T) -> Option<usize> {
         let tid = Tid::<C>::current();
         test_println!("insert {:?}", tid);
+        let mut value = Some(value);
         self.shards[tid.as_usize()]
-            .insert(value)
+            .init_with(|slot| slot.insert(&mut value))
             .map(|idx| tid.pack(idx))
     }
 
@@ -349,6 +321,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     /// [`take`]: #method.take
     pub fn remove(&self, idx: usize) -> bool {
+        // The `Drop` impl for `Guard` calls `remove_local` or `remove_remote` based
+        // on where the guard was dropped from. If the dropped guard was the last one, this will
+        // call `Slot::remove_value` which actually clears storage.
         let tid = C::unpack_tid(idx);
 
         test_println!("rm_deferred {:?}", tid);
@@ -434,7 +409,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust
     /// let slab = sharded_slab::Slab::new();
     /// let key = slab.insert("hello world").unwrap();
     ///
@@ -445,7 +420,18 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
-        self.shards.get(tid.as_usize())?.get(key)
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get(key, |x| {
+            x.as_ref().expect(
+                "if a slot can be accessed at the current generation, its value must be `Some`",
+            )
+        })?;
+
+        Some(Guard {
+            inner,
+            shard,
+            key,
+        })
     }
 
     /// Returns `true` if the slab contains a value for the given key.
@@ -496,133 +482,6 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
 
 unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
 unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
-
-// === impl Shard ===
-
-impl<T, C: cfg::Config> Shard<T, C> {
-    fn new(tid: usize) -> Self {
-        let mut total_sz = 0;
-        let shared = (0..C::MAX_PAGES)
-            .map(|page_num| {
-                let sz = C::page_size(page_num);
-                let prev_sz = total_sz;
-                total_sz += sz;
-                page::Shared::new(sz, prev_sz)
-            })
-            .collect();
-        let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
-        Self { tid, local, shared }
-    }
-
-    fn insert(&self, value: T) -> Option<usize> {
-        let mut value = Some(value);
-
-        // Can we fit the value into an existing page?
-        for (page_idx, page) in self.shared.iter().enumerate() {
-            let local = self.local(page_idx);
-
-            test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
-
-            if let Some(poff) = page.insert(local, &mut value) {
-                return Some(poff);
-            }
-        }
-
-        None
-    }
-
-    #[inline(always)]
-    fn get(&self, idx: usize) -> Option<Guard<'_, T, C>> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        test_println!("-> {:?}", addr);
-        if page_index > self.shared.len() {
-            return None;
-        }
-
-        let inner = self.shared[page_index].get(addr, idx)?;
-        Some(Guard {
-            inner,
-            shard: self,
-            key: idx,
-        })
-    }
-
-    fn remove_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
-    }
-
-    fn remove_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        let shared = &self.shared[page_index];
-        shared.remove(addr, C::unpack_gen(idx), shared.free_list())
-    }
-
-    /// Remove an item on the shard's local thread.
-    fn take_local(&self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        test_println!("-> remove_local {:?}", addr);
-
-        self.shared
-            .get(page_index)?
-            .take(addr, C::unpack_gen(idx), self.local(page_index))
-    }
-
-    /// Remove an item, while on a different thread from the shard's local thread.
-    fn take_remote(&self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        debug_assert!(Tid::<C>::current().as_usize() != self.tid);
-
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        test_println!("-> take_remote {:?}; page {:?}", addr, page_index);
-
-        let shared = self.shared.get(page_index)?;
-        shared.take(addr, C::unpack_gen(idx), shared.free_list())
-    }
-
-    #[inline(always)]
-    fn local(&self, i: usize) -> &page::Local {
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            Tid::<C>::current().as_usize(),
-            self.tid,
-            "tried to access local data from another thread!"
-        );
-
-        &self.local[i]
-    }
-
-    fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<T, C>> {
-        self.shared.iter()
-    }
-}
-
-impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut d = f.debug_struct("Shard");
-
-        #[cfg(debug_assertions)]
-        d.field("tid", &self.tid);
-        d.field("shared", &self.shared).finish()
-    }
-}
 
 // === impl Guard ===
 

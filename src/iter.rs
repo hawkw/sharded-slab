@@ -1,8 +1,8 @@
 use crate::{page, Shard};
 use std::slice;
 pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
-    pub(super) shards: slice::IterMut<'a, Shard<T, C>>,
-    pub(super) pages: slice::Iter<'a, page::Shared<T, C>>,
+    pub(super) shards: slice::IterMut<'a, Shard<Option<T>, C>>,
+    pub(super) pages: slice::Iter<'a, page::Shared<Option<T>, C>>,
     pub(super) slots: Option<page::Iter<'a, T, C>>,
 }
 

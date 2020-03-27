@@ -37,7 +37,7 @@ mod idx {
     }
 }
 
-struct TinyConfig;
+pub(crate) struct TinyConfig;
 
 impl crate::Config for TinyConfig {
     const INITIAL_PAGE_SIZE: usize = 4;

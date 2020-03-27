@@ -103,21 +103,21 @@ assert_eq!(hello.as_str(), "hello everyone!");
 - [`slab`]: Carl Lerche's `slab` crate provides a slab implementation with a
   similar API, implemented by storing all data in a single vector.
 
-  Unlike `sharded-slab`, inserting and removing elements from the slab
-  requires  mutable access. This means that if the slab is accessed
-  concurrently by multiple threads, it is necessary for it to be protected
-  by a `Mutex` or `RwLock`. Items may not be inserted or removed (or
-  accessed, if a `Mutex` is used) concurrently, even when they are
-  unrelated. In many cases, the lock can become a significant bottleneck. On
-  the other hand, this crate allows separate indices in the slab to be
-  accessed, inserted, and removed concurrently without requiring a global
-  lock. Therefore, when the slab is shared across multiple threads, this
-  crate offers significantly better performance than `slab`.
+  Unlike `sharded-slab`, inserting and removing elements from the slab requires
+  mutable access. This means that if the slab is accessed concurrently by
+  multiple threads, it is necessary for it to be protected by a `Mutex` or
+  `RwLock`. Items may not be inserted or removed (or accessed, if a `Mutex` is
+  used) concurrently, even when they are unrelated. In many cases, the lock can
+  become a significant bottleneck. On the other hand, `sharded-slab` allows
+  separate indices in the slab to be accessed, inserted, and removed
+  concurrently without requiring a global lock. Therefore, when the slab is
+  shared across multiple threads, this crate offers significantly better
+  performance than `slab`.
 
   However, the lock free slab introduces some additional constant-factor
   overhead. This means that in use-cases where a slab is _not_ shared by
-  multiple threads and locking is not required, this crate will likely offer
-  slightly worse performance.
+  multiple threads and locking is not required, `sharded-slab` will likely
+  offer slightly worse performance.
 
   In summary: `sharded-slab` offers significantly improved performance in
   concurrent use-cases, while `slab` should be preferred in single-threaded
