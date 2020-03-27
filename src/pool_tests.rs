@@ -16,11 +16,10 @@ struct State {
     is_dropped: AtomicBool,
     is_cleared: AtomicBool,
     id: usize,
-    storage: String,
 }
 
 impl State {
-    fn assert_not_clear(&self) {
+    fn assert_clear(&self) {
         assert!(!self.is_dropped.load(Ordering::SeqCst));
         assert!(self.is_cleared.load(Ordering::SeqCst));
     }
@@ -47,7 +46,6 @@ impl DontDropMe {
             is_dropped: AtomicBool::new(false),
             is_cleared: AtomicBool::new(false),
             id,
-            storage: String::new(),
         });
         (state.clone(), Self(state))
     }
@@ -81,7 +79,7 @@ fn pool_dont_drop() {
         test_println!("-> dont_drop: clearing idx: {}", idx);
         pool.clear(idx);
 
-        item1.assert_not_clear();
+        item1.assert_clear();
     });
 }
 
@@ -122,7 +120,7 @@ fn pool_concurrent_create_clear() {
         t1.join().expect("thread 1 unable to join");
 
         drop(guard);
-        item1.assert_not_clear();
+        item1.assert_clear();
     })
 }
 
@@ -132,9 +130,8 @@ fn pool_racy_clear() {
         let pool = Arc::new(Pool::new());
         let (item, value) = DontDropMe::new(1);
 
-        let mut value = Some(value);
         let idx = pool
-            .create_with(move |item| *item = value.take().expect("value created twice"))
+            .create_with(move |item| *item = value)
             .expect("Create");
         assert_eq!(pool.get(idx).unwrap().0.id, item.id);
 
@@ -151,7 +148,7 @@ fn pool_racy_clear() {
         );
         assert!(r1 || r2, "One thread should have removed the value");
         assert!(pool.get(idx).is_none());
-        item.assert_not_clear();
+        item.assert_clear();
     })
 }
 
@@ -161,15 +158,15 @@ fn pool_clear_local_and_reuse() {
         let pool = Arc::new(Pool::new_with_config::<TinyConfig>());
 
         let idx1 = pool
-            .create_with(move |item: &mut String| {
+            .create_with(|item: &mut String| {
                 item.push_str("hello world");
             })
             .expect("create");
         let idx2 = pool
-            .create_with(move |item| item.push_str("foo"))
+            .create_with(|item| item.push_str("foo"))
             .expect("create");
         let idx3 = pool
-            .create_with(move |item| item.push_str("bar"))
+            .create_with(|item| item.push_str("bar"))
             .expect("create");
 
         assert_eq!(pool.get(idx1).unwrap(), String::from("hello world"));

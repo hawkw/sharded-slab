@@ -421,7 +421,6 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
         Some(Guard {
             inner,
-            // Safe access as previous line checks for validity
             shard,
             key,
         })

@@ -76,11 +76,13 @@ pub(crate) struct Local {
 pub(crate) struct Shared<T, C> {
     /// The remote free list
     ///
-    /// This is where remote frees are pushed onto.
+    /// Slots freed from a remote thread are pushed onto this list.
     remote: stack::TransferStack<C>,
-    // tracks the size of the local free_list by keeping the index of the current position of the
-    // start of the local free list. If local.head() > size, it means that the local free_list if
-    // full.
+    // Total size of the page.
+    //
+    // If the head index of the local or remote free list is greater than the size of the
+    // page, then that free list is emtpy. If the head of both free lists is greater than `size`
+    // then there are no slots left in that page.
     size: usize,
     prev_sz: usize,
     slab: CausalCell<Option<Slots<T, C>>>,
@@ -138,7 +140,7 @@ where
     /// *Note*: The local list's head is reset when setting the new state in the slot pointed to be
     /// `head` returned from this function
     #[inline]
-    fn get_head(&self, local: &Local) -> Option<usize> {
+    fn pop(&self, local: &Local) -> Option<usize> {
         let head = local.head();
 
         test_println!("-> local head {:?}", head);
@@ -271,7 +273,7 @@ where
     where
         F: FnOnce(&Slot<T, C>) -> Option<slot::Generation<C>>,
     {
-        let head = self.get_head(local)?;
+        let head = self.pop(local)?;
 
         // do we need to allocate storage for this page?
         if self.is_unallocated() {

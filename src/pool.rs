@@ -114,12 +114,12 @@ where
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
-        let inner = self.shards.get(tid.as_usize())?.get(key, |x| x)?;
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get(key, |x| x)?;
 
         Some(PoolGuard {
             inner,
-            // Safe access as previous line checks for validity
-            shard: &self.shards[tid.as_usize()],
+            shard,
             key,
         })
     }
