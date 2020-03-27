@@ -24,6 +24,11 @@ impl State {
         assert!(!self.is_dropped.load(Ordering::SeqCst));
         assert!(self.is_cleared.load(Ordering::SeqCst));
     }
+
+    fn assert_not_clear(&self) {
+        assert!(!self.is_dropped.load(Ordering::SeqCst));
+        assert!(!self.is_cleared.load(Ordering::SeqCst));
+    }
 }
 
 impl PartialEq for State {
@@ -74,8 +79,7 @@ fn dont_drop() {
         test_println!("-> dont_drop: Inserting into pool {}", item1.id);
         let idx = pool.create(move |item| *item = value).expect("Create");
 
-        assert!(!item1.is_dropped.load(Ordering::SeqCst));
-        assert!(!item1.is_cleared.load(Ordering::SeqCst));
+        item1.assert_not_clear();
 
         test_println!("-> dont_drop: clearing idx: {}", idx);
         pool.clear(idx);
@@ -115,8 +119,7 @@ fn concurrent_create_clear() {
         }
         assert!(!pool.clear(idx1));
 
-        assert!(!item1.is_dropped.load(Ordering::SeqCst));
-        assert!(!item1.is_cleared.load(Ordering::SeqCst));
+        item1.assert_not_clear();
 
         t1.join().expect("thread 1 unable to join");
 
