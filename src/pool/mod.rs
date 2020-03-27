@@ -83,7 +83,7 @@ where
     /// let key = pool.create_with(|item| item.push_str("Hello")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
-    pub fn create_with(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
+    pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
         let tid = Tid::<C>::current();
         let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
@@ -251,3 +251,6 @@ where
         *self.inner.item() == *other
     }
 }
+
+#[cfg(test)]
+mod tests;
