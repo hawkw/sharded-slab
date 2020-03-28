@@ -1,14 +1,14 @@
 use std::{collections, hash, ops::DerefMut, sync};
 
+/// Clear all data in `self`, retaining the allocated capacithy.
+///
+/// # Note
+///
+/// This should only be implemented for types whose clear operation *retains
+/// any allocations* for that type. Types such as `BTreeMap`, whose
+/// `clear()` method releases the existing allocation, should *not*
+/// implement this trait.
 pub trait Clear {
-    /// Clear all data in `self`, retaining the allocated capacithy.
-    ///
-    /// # Note
-    ///
-    /// This should only be implemented for types whose clear operation *retains
-    /// any allocations* for that type. Types such as `BTreeMap`, whose
-    /// `clear()` method releases the existing allocation, should *not*
-    /// implement this trait.
     fn clear(&mut self);
 }
 

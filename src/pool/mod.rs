@@ -8,6 +8,41 @@ use crate::{
 
 use std::{fmt, marker::PhantomData};
 
+/// A lock-free concurrent object pool.
+///
+/// Slabs provide pre-allocated storage for many instances of a single type. But when working with
+/// heap allocated objects, the advantages of a Slab are lost as the memory allocated for the
+/// object is freed when the object is removed from the Slab. With a pool, we can instead re-use
+/// this memory for objects being added to the pool in the future, therefore reducing memory
+/// fragmentation and avoiding additional allocations.
+///
+/// This module implements a lock-free concurrent pool, indexed by `usize`s.
+///
+/// # Examples
+///
+/// Add an entry to the pool, returning an index:
+/// ```
+/// # use sharded_slab::Pool;
+/// let pool = Pool::new();
+///
+/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// ```
+/// The `Pool` type shares similar semantics to [`Slab`] when it comes to sharing across threads
+/// and storing mutable shared data. The biggest difference is there is no [`Slab::insert`] and
+/// [`Slab::take`] analouge for the `Pool` type. Instead new items are added to the pool by using
+/// the [`Pool::create`] method and marked for clearing by the [`Pool::clear`] method.
+///
+/// # Configuration
+///
+/// Both, `Pool` and `Slab` share the same configuration mechanism. See [crate level documentation][config-doc]
+/// for more details.
+///
+/// [`Slab::take`]: ../struct.Slab.html#method.take
+/// [`Slab::insert`]: ../struct.Slab.html#method.insert
+/// [`Pool::create`]: struct.Pool.html#method.create
+/// [`Pool::clear`]: struct.Pool.html#method.clear
+/// [config-doc]: ../index.html#configuration
 pub struct Pool<T, C = DefaultConfig>
 where
     T: Clear + Default,

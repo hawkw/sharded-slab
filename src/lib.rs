@@ -186,7 +186,7 @@ macro_rules! test_println {
 mod clear;
 pub mod implementation;
 mod page;
-pub mod pool;
+pub(crate) mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -195,8 +195,8 @@ mod iter;
 mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
-
 pub use pool::Pool;
+pub use clear::Clear;
 
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
