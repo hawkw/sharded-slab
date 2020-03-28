@@ -80,7 +80,7 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create_with(|item| item.push_str("Hello")).unwrap();
+    /// let key = pool.create(|item| item.push_str("Hello")).unwrap();
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
     pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
@@ -104,8 +104,7 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = sharded_slab::Pool::new();
-    /// let mut value = Some(String::from("hello world"));
-    /// let key = pool.create(move |item| *item = value.take().expect("crated twice")).unwrap();
+    /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     /// assert!(pool.get(12345).is_none());
@@ -136,8 +135,7 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let mut value = Some(String::from("hello world"));
-    /// let key = pool.create(move |item| *item = value.take().expect("crated twice")).unwrap();
+    /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     ///
