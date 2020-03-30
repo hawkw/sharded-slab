@@ -427,11 +427,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
             )
         })?;
 
-        Some(Guard {
-            inner,
-            shard,
-            key,
-        })
+        Some(Guard { inner, shard, key })
     }
 
     /// Returns `true` if the slab contains a value for the given key.
