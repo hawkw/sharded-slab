@@ -188,6 +188,15 @@ where
 {
 }
 
+impl<T> Default for Pool<T>
+where
+    T: Clear + Default,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a, T, C> PoolGuard<'a, T, C>
 where
     T: Clear + Default,
