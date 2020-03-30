@@ -225,11 +225,7 @@ where
 
         // Are there currently outstanding references to the slot? If so, it
         // will have to be removed when those references are dropped.
-        if refs.value > 0 {
-            true
-        } else {
-            false
-        }
+        refs.value > 0
     }
 
     /// Mutates this slot.
@@ -459,9 +455,9 @@ where
         // release_with will _always_ wait unitl it can release the slot or just return if the slot
         // has already been released.
         self.release_with(gen, offset, free, |item| {
-            let val = item.and_then(|inner| Some(Clear::clear(inner))).is_some();
-            test_println!("-> {}", val);
-            val
+            let cleared = item.map(|inner| Clear::clear(inner)).is_some();
+            test_println!("-> cleared: {}", cleared);
+            cleared
         })
     }
 }
