@@ -116,11 +116,7 @@ where
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.get(key, |x| x)?;
 
-        Some(PoolGuard {
-            inner,
-            shard,
-            key,
-        })
+        Some(PoolGuard { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning

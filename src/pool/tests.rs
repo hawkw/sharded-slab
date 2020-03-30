@@ -1,8 +1,7 @@
 use crate::{
     clear::Clear,
     tests::{util::*, TinyConfig},
-    Pack,
-    Pool,
+    Pack, Pool,
 };
 use loom::{
     sync::{
@@ -134,9 +133,7 @@ fn racy_clear() {
         let pool = Arc::new(Pool::new());
         let (item, value) = DontDropMe::new(1);
 
-        let idx = pool
-            .create(move |item| *item = value)
-            .expect("Create");
+        let idx = pool.create(move |item| *item = value).expect("Create");
         assert_eq!(pool.get(idx).unwrap().0.id, item.id);
 
         let p = pool.clone();
@@ -166,12 +163,8 @@ fn clear_local_and_reuse() {
                 item.push_str("hello world");
             })
             .expect("create");
-        let idx2 = pool
-            .create(|item| item.push_str("foo"))
-            .expect("create");
-        let idx3 = pool
-            .create(|item| item.push_str("bar"))
-            .expect("create");
+        let idx2 = pool.create(|item| item.push_str("foo")).expect("create");
+        let idx3 = pool.create(|item| item.push_str("bar")).expect("create");
 
         assert_eq!(pool.get(idx1).unwrap(), String::from("hello world"));
         assert_eq!(pool.get(idx2).unwrap(), String::from("foo"));
@@ -180,9 +173,7 @@ fn clear_local_and_reuse() {
         let first = idx1 & (!crate::page::slot::Generation::<TinyConfig>::MASK);
         assert!(pool.clear(idx1));
 
-        let idx1 = pool
-            .create(move |item| item.push_str("h"))
-            .expect("create");
+        let idx1 = pool.create(move |item| item.push_str("h")).expect("create");
 
         let second = idx1 & (!crate::page::slot::Generation::<TinyConfig>::MASK);
         assert_eq!(first, second);
