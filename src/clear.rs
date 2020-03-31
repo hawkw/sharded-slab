@@ -7,7 +7,7 @@ use std::{collections, hash, ops::DerefMut, sync};
 /// collection types, including as [`Vec::clear`], [`String::clear`], and
 /// [`HashMap::clear`]. These methods drop all data stored in the collection,
 /// but retain the collection's heap allocation for future use. Types such as
-/// `BTreeMap`, whose `clear` methods drops allocations, should not 
+/// `BTreeMap`, whose `clear` methods drops allocations, should not
 /// implement this trait.
 ///
 /// When implemented for types which do not own a heap allocation, `Clear`
