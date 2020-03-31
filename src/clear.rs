@@ -6,8 +6,9 @@ use std::{collections, hash, ops::DerefMut, sync};
 /// This is essentially a generalization of methods on standard library
 /// collection types, including as [`Vec::clear`], [`String::clear`], and
 /// [`HashMap::clear`]. These methods drop all data stored in the collection,
-/// but retain the collection's heap allocation for future use. Types such as `BTreeMap` whose
-/// `clear` methods drops allocations should not implement this trait.
+/// but retain the collection's heap allocation for future use. Types such as
+/// `BTreeMap`, whose `clear` methods drops allocations, should not 
+/// implement this trait.
 ///
 /// When implemented for types which do not own a heap allocation, `Clear`
 /// should reset the type in place if possible. If the type has an empty state
