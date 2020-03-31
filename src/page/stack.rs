@@ -72,14 +72,14 @@ impl<C> fmt::Debug for TransferStack<C> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{sync::CausalCell, test_util};
+    use crate::{sync::UnsafeCell, test_util};
     use loom::thread;
     use std::sync::Arc;
 
     #[test]
     fn transfer_stack() {
         test_util::run_model("transfer_stack", || {
-            let causalities = [CausalCell::new(999), CausalCell::new(999)];
+            let causalities = [UnsafeCell::new(999), UnsafeCell::new(999)];
             let shared = Arc::new((causalities, TransferStack::<cfg::DefaultConfig>::new()));
             let shared1 = shared.clone();
             let shared2 = shared.clone();
@@ -113,7 +113,7 @@ mod test {
             causalities[idx].with(|val| unsafe {
                 assert_eq!(
                     *val, idx,
-                    "CausalCell write must happen-before index is pushed to the stack!"
+                    "UnsafeCell write must happen-before index is pushed to the stack!"
                 );
             });
 

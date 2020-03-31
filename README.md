@@ -131,7 +131,7 @@ Most implementations of lock-free data structures in Rust require some
 amount of unsafe code, and this crate is not an exception. In order to catch
 potential bugs in this unsafe code, we make use of [`loom`], a
 permutation-testing tool for concurrent Rust programs. All `unsafe` blocks
-this crate occur in accesses to `loom` `CausalCell`s. This means that when
+this crate occur in accesses to `loom` `UnsafeCell`s. This means that when
 those accesses occur in this crate's tests, `loom` will assert that they are
 valid under the C11 memory model across multiple permutations of concurrent
 executions of those tests.

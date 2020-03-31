@@ -1,7 +1,7 @@
 use super::FreeList;
 use crate::sync::{
     atomic::{self, AtomicUsize, Ordering},
-    CausalCell,
+    UnsafeCell,
 };
 use crate::{cfg, clear::Clear, Pack, Tid};
 use std::{fmt, marker::PhantomData};
@@ -9,9 +9,9 @@ use std::{fmt, marker::PhantomData};
 pub(crate) struct Slot<T, C> {
     lifecycle: AtomicUsize,
     /// The offset of the next item on the free list.
-    next: CausalCell<usize>,
+    next: UnsafeCell<usize>,
     /// The data stored in the slot.
-    item: CausalCell<T>,
+    item: UnsafeCell<T>,
     _cfg: PhantomData<fn(C)>,
 }
 
@@ -417,8 +417,8 @@ where
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
             lifecycle: AtomicUsize::new(0),
-            item: CausalCell::new(T::default()),
-            next: CausalCell::new(next),
+            item: UnsafeCell::new(T::default()),
+            next: UnsafeCell::new(next),
             _cfg: PhantomData,
         }
     }

@@ -1,6 +1,6 @@
 use crate::cfg::{self, CfgPrivate};
 use crate::clear::Clear;
-use crate::sync::CausalCell;
+use crate::sync::UnsafeCell;
 use crate::Pack;
 
 pub(crate) mod slot;
@@ -70,7 +70,7 @@ pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
 
 pub(crate) struct Local {
     /// Index of the first slot on the local free list
-    head: CausalCell<usize>,
+    head: UnsafeCell<usize>,
 }
 
 pub(crate) struct Shared<T, C> {
@@ -85,7 +85,7 @@ pub(crate) struct Shared<T, C> {
     // then there are no slots left in that page.
     size: usize,
     prev_sz: usize,
-    slab: CausalCell<Option<Slots<T, C>>>,
+    slab: UnsafeCell<Option<Slots<T, C>>>,
 }
 
 type Slots<T, C> = Box<[Slot<T, C>]>;
@@ -93,7 +93,7 @@ type Slots<T, C> = Box<[Slot<T, C>]>;
 impl Local {
     pub(crate) fn new() -> Self {
         Self {
-            head: CausalCell::new(0),
+            head: UnsafeCell::new(0),
         }
     }
 
@@ -128,7 +128,7 @@ where
             prev_sz,
             size,
             remote: stack::TransferStack::new(),
-            slab: CausalCell::new(None),
+            slab: UnsafeCell::new(None),
         }
     }
 
