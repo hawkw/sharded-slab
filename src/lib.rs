@@ -186,7 +186,7 @@ macro_rules! test_println {
 mod clear;
 pub mod implementation;
 mod page;
-pub(crate) mod pool;
+mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -195,8 +195,8 @@ mod iter;
 mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
-pub use pool::Pool;
 pub use clear::Clear;
+pub use pool::{Pool, PoolGuard};
 
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
@@ -427,11 +427,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
             )
         })?;
 
-        Some(Guard {
-            inner,
-            shard,
-            key,
-        })
+        Some(Guard { inner, shard, key })
     }
 
     /// Returns `true` if the slab contains a value for the given key.

@@ -11,31 +11,46 @@ use std::{fmt, marker::PhantomData};
 /// A lock-free concurrent object pool.
 ///
 /// Slabs provide pre-allocated storage for many instances of a single type. But when working with
-/// heap allocated objects, the advantages of a Slab are lost as the memory allocated for the
-/// object is freed when the object is removed from the Slab. With a pool, we can instead re-use
+/// heap allocated objects, the advantages of a slab are lost as the memory allocated for the
+/// object is freed when the object is removed from the slab. With a pool, we can instead re-use
 /// this memory for objects being added to the pool in the future, therefore reducing memory
 /// fragmentation and avoiding additional allocations.
 ///
-/// This module implements a lock-free concurrent pool, indexed by `usize`s.
+/// This type implements a lock-free concurrent pool, indexed by `usize`s. The items stored in this
+/// type need to implement [`Clear`] and `Default`.
+///
+/// The `Pool` type shares similar semantics to [`Slab`] when it comes to sharing across threads
+/// and storing mutable shared data. The biggest difference is there are no [`Slab::insert`] and
+/// [`Slab::take`] analouges for the `Pool` type. Instead new items are added to the pool by using
+/// the [`Pool::create`] method, and marked for clearing by the [`Pool::clear`] method.
 ///
 /// # Examples
 ///
 /// Add an entry to the pool, returning an index:
 /// ```
 /// # use sharded_slab::Pool;
-/// let pool = Pool::new();
+/// let pool: Pool<String> = Pool::new();
 ///
 /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
 /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
 /// ```
-/// The `Pool` type shares similar semantics to [`Slab`] when it comes to sharing across threads
-/// and storing mutable shared data. The biggest difference is there is no [`Slab::insert`] and
-/// [`Slab::take`] analouge for the `Pool` type. Instead new items are added to the pool by using
-/// the [`Pool::create`] method and marked for clearing by the [`Pool::clear`] method.
 ///
+/// Pool entries can be cleared either by manually calling [`Pool::clear`] or when the guard is
+/// dropped. The entry will be cleared when all the references to it are dropped.
+/// ```
+/// # use sharded_slab::Pool;
+/// # use std::thread;
+/// # use std::sync::Arc;
+/// let pool: Pool<String> = Pool::new();
+///
+/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+///
+/// // Mark this entry to be cleared.
+/// pool.clear(key);
+/// ```
 /// # Configuration
 ///
-/// Both, `Pool` and `Slab` share the same configuration mechanism. See [crate level documentation][config-doc]
+/// Both `Pool` and [`Slab`] share the same configuration mechanism. See [crate level documentation][config-doc]
 /// for more details.
 ///
 /// [`Slab::take`]: ../struct.Slab.html#method.take
@@ -43,6 +58,8 @@ use std::{fmt, marker::PhantomData};
 /// [`Pool::create`]: struct.Pool.html#method.create
 /// [`Pool::clear`]: struct.Pool.html#method.clear
 /// [config-doc]: ../index.html#configuration
+/// [`Clear`]: trait.Clear.html
+/// [`Slab`]: struct.Slab.html
 pub struct Pool<T, C = DefaultConfig>
 where
     T: Clear + Default,
@@ -151,11 +168,7 @@ where
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.get(key, |x| x)?;
 
-        Some(PoolGuard {
-            inner,
-            shard,
-            key,
-        })
+        Some(PoolGuard { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
