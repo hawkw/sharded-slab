@@ -6,13 +6,18 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - nightly
     steps:
       - uses: actions/checkout@master
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: ${{ matrix.rust }}
           override: true
       - name: Cargo check
         uses: actions-rs/cargo@v1
