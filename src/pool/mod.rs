@@ -10,9 +10,9 @@ use std::{fmt, marker::PhantomData};
 
 /// A lock-free concurrent object pool.
 ///
-/// Slabs provide pre-allocated storage for many instances of a single type. But when working with
-/// heap allocated objects, the advantages of a slab are lost as the memory allocated for the
-/// object is freed when the object is removed from the slab. With a pool, we can instead re-use
+/// Slabs provide pre-allocated storage for many instances of a single type. But, when working with
+/// heap allocated objects, the advantages of a slab are lost, as the memory allocated for the
+/// object is freed when the object is removed from the slab. With a pool, we can instead reuse
 /// this memory for objects being added to the pool in the future, therefore reducing memory
 /// fragmentation and avoiding additional allocations.
 ///
@@ -35,18 +35,19 @@ use std::{fmt, marker::PhantomData};
 /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
 /// ```
 ///
-/// Pool entries can be cleared either by manually calling [`Pool::clear`] or when the guard is
-/// dropped. The entry will be cleared when all the references to it are dropped.
+/// Pool entries can be cleared either by manually calling [`Pool::clear`]. This marks the entry to
+/// be cleared when the guards referencing to it are dropped.
 /// ```
 /// # use sharded_slab::Pool;
-/// # use std::thread;
-/// # use std::sync::Arc;
 /// let pool: Pool<String> = Pool::new();
 ///
 /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
 ///
 /// // Mark this entry to be cleared.
 /// pool.clear(key);
+///
+/// // The cleared entry is no longer available in the pool
+/// assert!(pool.get(key).is_none());
 /// ```
 /// # Configuration
 ///
