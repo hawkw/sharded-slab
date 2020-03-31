@@ -12,6 +12,7 @@ jobs:
         with:
           command: check
           args: --all-features
+          
   test:
     name: test
     runs-on: ubuntu-latest
@@ -19,12 +20,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@master
-      - uses: actions-rs/cargo@v1
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
         with:
-          command: test
-          args: --all-features
-        env:
-          LOOM_MAX_PREEMPTIONS: 2
+          toolchain: nightly
+          override: true
+
+      - name: Run tests
+        run: ./bin/loom.sh
 
   clippy_check:
     runs-on: ubuntu-latest
