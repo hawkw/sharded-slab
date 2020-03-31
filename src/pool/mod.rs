@@ -8,6 +8,59 @@ use crate::{
 
 use std::{fmt, marker::PhantomData};
 
+/// A lock-free concurrent object pool.
+///
+/// Slabs provide pre-allocated storage for many instances of a single type. But, when working with
+/// heap allocated objects, the advantages of a slab are lost, as the memory allocated for the
+/// object is freed when the object is removed from the slab. With a pool, we can instead reuse
+/// this memory for objects being added to the pool in the future, therefore reducing memory
+/// fragmentation and avoiding additional allocations.
+///
+/// This type implements a lock-free concurrent pool, indexed by `usize`s. The items stored in this
+/// type need to implement [`Clear`] and `Default`.
+///
+/// The `Pool` type shares similar semantics to [`Slab`] when it comes to sharing across threads
+/// and storing mutable shared data. The biggest difference is there are no [`Slab::insert`] and
+/// [`Slab::take`] analouges for the `Pool` type. Instead new items are added to the pool by using
+/// the [`Pool::create`] method, and marked for clearing by the [`Pool::clear`] method.
+///
+/// # Examples
+///
+/// Add an entry to the pool, returning an index:
+/// ```
+/// # use sharded_slab::Pool;
+/// let pool: Pool<String> = Pool::new();
+///
+/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// ```
+///
+/// Pool entries can be cleared either by manually calling [`Pool::clear`]. This marks the entry to
+/// be cleared when the guards referencing to it are dropped.
+/// ```
+/// # use sharded_slab::Pool;
+/// let pool: Pool<String> = Pool::new();
+///
+/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+///
+/// // Mark this entry to be cleared.
+/// pool.clear(key);
+///
+/// // The cleared entry is no longer available in the pool
+/// assert!(pool.get(key).is_none());
+/// ```
+/// # Configuration
+///
+/// Both `Pool` and [`Slab`] share the same configuration mechanism. See [crate level documentation][config-doc]
+/// for more details.
+///
+/// [`Slab::take`]: ../struct.Slab.html#method.take
+/// [`Slab::insert`]: ../struct.Slab.html#method.insert
+/// [`Pool::create`]: struct.Pool.html#method.create
+/// [`Pool::clear`]: struct.Pool.html#method.clear
+/// [config-doc]: ../index.html#configuration
+/// [`Clear`]: trait.Clear.html
+/// [`Slab`]: struct.Slab.html
 pub struct Pool<T, C = DefaultConfig>
 where
     T: Clear + Default,
