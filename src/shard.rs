@@ -108,29 +108,6 @@ where
         shared.take(addr, C::unpack_gen(idx), shared.free_list())
     }
 
-    pub(crate) fn remove_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        self.shared[page_index].remove(addr, C::unpack_gen(idx), self.local(page_index))
-    }
-
-    pub(crate) fn remove_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
-        let (addr, page_index) = page::indices::<C>(idx);
-
-        if page_index > self.shared.len() {
-            return false;
-        }
-
-        let shared = &self.shared[page_index];
-        shared.remove(addr, C::unpack_gen(idx), shared.free_list())
-    }
-
     pub(crate) fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<Option<T>, C>> {
         self.shared.iter()
     }

@@ -223,27 +223,6 @@ where
         })
     }
 
-    pub(crate) fn remove<F: FreeList<C>>(
-        &self,
-        addr: Addr<C>,
-        gen: slot::Generation<C>,
-        free_list: &F,
-    ) -> bool {
-        let offset = addr.offset() - self.prev_sz;
-
-        test_println!("-> offset {:?}", offset);
-
-        self.slab.with(|slab| {
-            let slab = unsafe { &*slab }.as_ref();
-            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.try_remove_value(gen, offset, free_list);
-                true
-            } else {
-                false
-            }
-        })
-    }
-
     // Need this function separately, as we need to pass a function pointer to `filter_map` and
     // `Slot::value` just returns a `&T`, specifically a `&Option<T>` for this impl.
     fn make_ref(slot: &'a Slot<Option<T>, C>) -> Option<&'a T> {

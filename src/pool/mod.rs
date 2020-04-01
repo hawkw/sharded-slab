@@ -4,6 +4,7 @@ use crate::{
     page,
     tid::Tid,
     Pack, Shard,
+    Guard
 };
 
 use std::{fmt, marker::PhantomData};
@@ -162,14 +163,14 @@ where
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     /// assert!(pool.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<PoolGuard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.get(key, |x| x)?;
 
-        Some(PoolGuard { inner, shard, key })
+        Some(Guard { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning

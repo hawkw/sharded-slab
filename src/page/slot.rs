@@ -376,27 +376,6 @@ where
         Some(gen)
     }
 
-    /// Tries to remove the value in the slot
-    ///
-    /// This method tries to remove the value in the slot. If there are existing references, then
-    /// the slot is marked for removal and the next thread calling either this method or
-    /// `remove_value` will do the work instead.
-    #[inline]
-    pub(super) fn try_remove_value<F: FreeList<C>>(
-        &self,
-        gen: Generation<C>,
-        offset: usize,
-        free: &F,
-    ) -> Option<T> {
-        if self.mark_release(gen) {
-            None
-        } else {
-            // Otherwise, we can remove the slot now!
-            test_println!("-> try_remove_value; can remove now");
-            self.remove_value(gen, offset, free)
-        }
-    }
-
     #[inline]
     pub(super) fn remove_value<F: FreeList<C>>(
         &self,

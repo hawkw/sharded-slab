@@ -216,7 +216,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, T, C>,
-    shard: &'a Shard<Option<T>, C>,
+    shard: &'a Shard<T, C>,
     key: usize,
 }
 
@@ -329,9 +329,9 @@ impl<T, C: cfg::Config> Slab<T, C> {
         test_println!("rm_deferred {:?}", tid);
         let shard = self.shards.get(tid.as_usize());
         if tid.is_current() {
-            shard.map(|shard| shard.remove_local(idx)).unwrap_or(false)
+            shard.map(|shard| shard.mark_clear_local(idx)).unwrap_or(false)
         } else {
-            shard.map(|shard| shard.remove_remote(idx)).unwrap_or(false)
+            shard.map(|shard| shard.mark_clear_remote(idx)).unwrap_or(false)
         }
     }
 
@@ -502,9 +502,9 @@ impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.remove_local(self.key);
+                self.shard.mark_clear_local(self.key);
             } else {
-                self.shard.remove_remote(self.key);
+                self.shard.mark_clear_remote(self.key);
             }
         }
     }
