@@ -8,6 +8,42 @@
 //!
 //! This crate implements a lock-free concurrent slab, indexed by `usize`s.
 //!
+//! ## Usage
+//!
+//! First, add this to your `Cargo.toml`:
+//!
+//! ```toml
+//! sharded-slab = "0.0.8"
+//! ```
+//!
+//! This crate provides two  types, [`Slab`] and [`Pool`], which provide
+//! slightly different APIs for using a sharded slab.
+//!
+//! [`Slab`] implements a slab for _storing_ small types, sharing them between
+//! threads, and accessing them by index. New entries are allocated by
+//! [inserting] data, moving it in by value. Similarly, entries may be
+//! deallocated by [taking] from the slab, moving the value out. This API is
+//! similar to a `Vec<Option<T>>`, but allowing lock-free concurrent insertion
+//! and removal.
+//!
+//! In contrast, the [`Pool`] type provides an [object pool] style API for
+//! _reusing storage_. Rather than constructing values and moving them into the
+//! pool, as with [`Slab`], [allocating an entry][create] from the pool takes a
+//! closure that's provided with a mutable reference to initialize the entry in
+//! place. When entries are deallocated, they are [cleared] in place. Types
+//! which own a heap allocation can be cleared by dropping any _data_ they
+//! store, but retaining any previously-allocated capacity. This means that a
+//! [`Pool`] may be used to reuse a set of existing heap allocations, reducing
+//! allocator load.
+//!
+//! [`Slab`]: struct.Slab.html
+//! [inserting]: struct.Slab.html#method.insert
+//! [taking]: struct.Slab.html#method.take
+//! [`Pool`]: struct.Pool.html
+//! [create]: struct.Pool.html#method.create
+//! [cleared]: trait.Clear.html
+//! [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
+//!
 //! # Examples
 //!
 //! Inserting an item into the slab, returning an index:
