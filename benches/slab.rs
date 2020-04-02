@@ -1,44 +1,10 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::{
-    sync::{Arc, Barrier, RwLock},
-    thread,
-    time::{Duration, Instant},
+    sync::{Arc, RwLock},
+    time::Duration,
 };
-
-#[derive(Clone)]
-struct MultithreadedBench<T> {
-    start: Arc<Barrier>,
-    end: Arc<Barrier>,
-    slab: Arc<T>,
-}
-
-impl<T: Send + Sync + 'static> MultithreadedBench<T> {
-    fn new(slab: Arc<T>) -> Self {
-        Self {
-            start: Arc::new(Barrier::new(5)),
-            end: Arc::new(Barrier::new(5)),
-            slab,
-        }
-    }
-
-    fn thread(&self, f: impl FnOnce(&Barrier, &T) + Send + 'static) -> &Self {
-        let start = self.start.clone();
-        let end = self.end.clone();
-        let slab = self.slab.clone();
-        thread::spawn(move || {
-            f(&*start, &*slab);
-            end.wait();
-        });
-        self
-    }
-
-    fn run(&self) -> Duration {
-        self.start.wait();
-        let t0 = Instant::now();
-        self.end.wait();
-        t0.elapsed()
-    }
-}
+mod support;
+use support::*;
 
 const N_INSERTIONS: &'static [usize] = &[100, 300, 500, 700, 1000, 3000, 5000];
 
