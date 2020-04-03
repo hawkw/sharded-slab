@@ -13,7 +13,7 @@
 //! First, add this to your `Cargo.toml`:
 //!
 //! ```toml
-//! sharded-slab = "0.0.8"
+//! sharded-slab = "0.0.9"
 //! ```
 //!
 //! This crate provides two  types, [`Slab`] and [`Pool`], which provide
