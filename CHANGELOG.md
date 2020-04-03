@@ -1,3 +1,22 @@
+<a name="0.0.9"></a>
+### 0.0.9 (2020-04-03)
+
+
+#### Features
+
+* **Config:**  validate concurrent refs ([9b32af58](9b32af58), closes [#21](21))
+* **Pool:**
+  *  add `fmt::Debug` impl for `Pool` ([ffa5c7a0](ffa5c7a0))
+  *  add `Default` impl for `Pool` ([d2399365](d2399365))
+  *  add a sharded object pool for reusing heap allocations (#19) ([89734508](89734508), closes [#2](2), [#15](15))
+* **Slab::take:**  add exponential backoff when spinning ([6b743a27](6b743a27))
+
+#### Bug Fixes
+
+*   incorrect wrapping when overflowing maximum ref count ([aea693f3](aea693f3), closes [#22](22))
+
+
+
 <a name="0.0.8"></a>
 ### 0.0.8 (2020-01-31)
 
