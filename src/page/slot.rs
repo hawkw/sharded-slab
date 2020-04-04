@@ -4,7 +4,7 @@ use crate::sync::{
     UnsafeCell,
 };
 use crate::{cfg, clear::Clear, Pack, Tid};
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, ptr::NonNull };
 
 pub(crate) struct Slot<T, C> {
     lifecycle: AtomicUsize,
@@ -20,6 +20,12 @@ pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
     item: &'a T,
     lifecycle: &'a AtomicUsize,
     _cfg: PhantomData<fn(C)>,
+}
+
+#[derive(Debug)]
+pub(crate) struct OwnedGuard<T> {
+    item: NonNull<T>,
+    lifecycle: NonNull<AtomicUsize>,
 }
 
 #[repr(transparent)]
@@ -76,6 +82,15 @@ impl<C: cfg::Config> Generation<C> {
     }
 }
 
+pub(crate) fn into_owned_guard<T, C: cfg::Config>(
+    guard: Guard<'_, T, C>,
+) -> OwnedGuard<T> {
+    OwnedGuard {
+        item: guard.item.into(),
+        lifecycle: guard.lifecycle.into()
+    }
+}
+
 // Slot methods which should work across all trait bounds
 impl<T, C> Slot<T, C>
 where
@@ -89,6 +104,11 @@ where
     #[inline(always)]
     pub(super) fn value(&self) -> &T {
         self.item.with(|item| unsafe { &*item })
+    }
+
+    #[inline(always)]
+    pub(super) fn lifecycle(&self) -> &AtomicUsize {
+        &self.lifecycle
     }
 
     #[inline(always)]

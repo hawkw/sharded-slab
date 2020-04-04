@@ -64,6 +64,22 @@ where
         self.shared[page_index].get(addr, idx, f)
     }
 
+    pub(crate) fn get_owned<U>(
+        &self,
+        idx: usize,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<page::slot::OwnedGuard<U>> {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        test_println!("-> {:?}", addr);
+        if page_index > self.shared.len() {
+            return None;
+        }
+
+        self.shared[page_index].get_owned(addr, idx, f)
+    }
+
     pub(crate) fn new(tid: usize) -> Self {
         let mut total_sz = 0;
         let shared = (0..C::MAX_PAGES)

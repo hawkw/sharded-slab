@@ -235,7 +235,7 @@ pub use clear::Clear;
 pub use pool::{Pool, PoolGuard};
 
 use shard::Shard;
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 /// A sharded slab.
 ///
@@ -256,6 +256,12 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
+pub struct OwnedSlabGuard<T, C : cfg::Config = DefaultConfig> {
+    inner: page::slot::OwnedGuard<T>,
+    slab: Arc<Slab<T, C>>,
+    key: usize,
+}
+
 impl<T> Slab<T> {
     /// Returns a new slab with the default configuration parameters.
     pub fn new() -> Self {
@@ -270,6 +276,26 @@ impl<T> Slab<T> {
             shards,
             _cfg: PhantomData,
         }
+    }
+}
+
+impl<T, C: cfg::Config = DefaultConfig> Slab<T, C> {
+    fn get_owned(self: &Arc<Self>, key: usize) -> Option<OwnedSlabGuard<T>> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("-> :get_owned {:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get_owned(key, |x| {
+            x.as_ref().expect(
+                "if a slot can be accessed at the current generation, its value must be `Some`",
+            )
+        })?;
+
+        Some(OwnedSlabGuard {
+            inner,
+            slab: self.clone(),
+            key,
+        })
     }
 }
 
