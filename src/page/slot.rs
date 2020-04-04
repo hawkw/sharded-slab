@@ -4,7 +4,7 @@ use crate::sync::{
     UnsafeCell,
 };
 use crate::{cfg, clear::Clear, Pack, Tid};
-use std::{fmt, marker::PhantomData, ptr::NonNull };
+use std::{fmt, marker::PhantomData, ptr::NonNull};
 
 pub(crate) struct Slot<T, C> {
     lifecycle: AtomicUsize,
@@ -79,15 +79,6 @@ impl<C: cfg::Config> Generation<C> {
             value,
             _cfg: PhantomData,
         }
-    }
-}
-
-pub(crate) fn into_owned_guard<T, C: cfg::Config>(
-    guard: Guard<'_, T, C>,
-) -> OwnedGuard<T> {
-    OwnedGuard {
-        item: guard.item.into(),
-        lifecycle: guard.lifecycle.into()
     }
 }
 
@@ -581,6 +572,13 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
                     lifecycle = actual;
                 }
             }
+        }
+    }
+
+    pub(crate) fn into_owned_guard(self) -> OwnedGuard<T> {
+        OwnedGuard {
+            item: self.item.into(),
+            lifecycle: self.lifecycle.into(),
         }
     }
 

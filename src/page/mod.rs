@@ -202,11 +202,7 @@ where
         let poff = addr.offset() - self.prev_sz;
         let guard = self.get(addr, idx, f)?;
 
-        self.slab.with(|slab| {
-            let slot = unsafe { &*slab }.as_ref()?.get(poff)?;
-
-            Some(self::slot::into_owned_guard(guard))
-        })
+        Some(guard.into_owned_guard())
     }
 
     #[inline(always)]

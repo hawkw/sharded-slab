@@ -256,7 +256,7 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
-pub struct OwnedSlabGuard<T, C : cfg::Config = DefaultConfig> {
+pub struct OwnedSlabGuard<T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::OwnedGuard<T>,
     slab: Arc<Slab<T, C>>,
     key: usize,
@@ -279,7 +279,7 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T, C: cfg::Config = DefaultConfig> Slab<T, C> {
+impl<T, C: cfg::Config> Slab<T, C> {
     fn get_owned(self: &Arc<Self>, key: usize) -> Option<OwnedSlabGuard<T>> {
         let tid = C::unpack_tid(key);
 
