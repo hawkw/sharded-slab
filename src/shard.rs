@@ -68,7 +68,7 @@ where
         &self,
         idx: usize,
         f: impl FnOnce(&T) -> &U,
-    ) -> Option<page::slot::OwnedGuard<U>> {
+    ) -> Option<page::slot::OwnedGuard<U, C>> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 

@@ -23,9 +23,10 @@ pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
 }
 
 #[derive(Debug)]
-pub(crate) struct OwnedGuard<T> {
+pub(crate) struct OwnedGuard<T, C = cfg::DefaultConfig> {
     item: NonNull<T>,
     lifecycle: NonNull<AtomicUsize>,
+    _cfg: PhantomData<fn(C)>
 }
 
 #[repr(transparent)]
@@ -95,11 +96,6 @@ where
     #[inline(always)]
     pub(super) fn value(&self) -> &T {
         self.item.with(|item| unsafe { &*item })
-    }
-
-    #[inline(always)]
-    pub(super) fn lifecycle(&self) -> &AtomicUsize {
-        &self.lifecycle
     }
 
     #[inline(always)]
@@ -575,10 +571,11 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
         }
     }
 
-    pub(crate) fn into_owned_guard(self) -> OwnedGuard<T> {
+    pub(crate) fn into_owned_guard(self) -> OwnedGuard<T, C> {
         OwnedGuard {
             item: self.item.into(),
             lifecycle: self.lifecycle.into(),
+            _cfg: PhantomData
         }
     }
 

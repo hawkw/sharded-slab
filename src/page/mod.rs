@@ -198,8 +198,7 @@ where
         addr: Addr<C>,
         idx: usize,
         f: impl FnOnce(&T) -> &U,
-    ) -> Option<slot::OwnedGuard<U>> {
-        let poff = addr.offset() - self.prev_sz;
+    ) -> Option<slot::OwnedGuard<U, C>> {
         let guard = self.get(addr, idx, f)?;
 
         Some(guard.into_owned_guard())

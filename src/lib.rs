@@ -257,7 +257,7 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
 }
 
 pub struct OwnedSlabGuard<T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::OwnedGuard<T>,
+    inner: page::slot::OwnedGuard<T, C>,
     slab: Arc<Slab<T, C>>,
     key: usize,
 }
@@ -276,26 +276,6 @@ impl<T> Slab<T> {
             shards,
             _cfg: PhantomData,
         }
-    }
-}
-
-impl<T, C: cfg::Config> Slab<T, C> {
-    fn get_owned(self: &Arc<Self>, key: usize) -> Option<OwnedSlabGuard<T>> {
-        let tid = C::unpack_tid(key);
-
-        test_println!("-> :get_owned {:?}; current={:?}", tid, Tid::<C>::current());
-        let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.get_owned(key, |x| {
-            x.as_ref().expect(
-                "if a slot can be accessed at the current generation, its value must be `Some`",
-            )
-        })?;
-
-        Some(OwnedSlabGuard {
-            inner,
-            slab: self.clone(),
-            key,
-        })
     }
 }
 
@@ -492,6 +472,23 @@ impl<T, C: cfg::Config> Slab<T, C> {
         Some(Guard { inner, shard, key })
     }
 
+    pub fn get_owned(self: &Arc<Self>, key: usize) -> Option<OwnedSlabGuard<T, C>> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("-> :get_owned {:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get_owned(key, |x| {
+            x.as_ref().expect(
+                "if a slot can be accessed at the current generation, its value must be `Some`",
+            )
+        })?;
+
+        Some(OwnedSlabGuard {
+            inner,
+            slab: self.clone(),
+            key,
+        })
+    }
     /// Returns `true` if the slab contains a value for the given key.
     ///
     /// # Examples
