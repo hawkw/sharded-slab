@@ -3,10 +3,10 @@ use crate::{
     clear::Clear,
     page,
     tid::Tid,
-    Pack, Shard,
+    Pack, Shard
 };
 
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 /// A lock-free concurrent object pool.
 ///
@@ -104,6 +104,14 @@ where
     key: usize,
 }
 
+pub struct OwnedPoolGuard<T, C: cfg::Config = DefaultConfig>
+where
+    T: Default + Clear,
+{
+    inner: page::slot::OwnedGuard<T, C>,
+    pool: Arc<Pool<T, C>>,
+    key: usize,
+}
 impl<T, C> Pool<T, C>
 where
     T: Clear + Default,
@@ -172,6 +180,19 @@ where
         Some(PoolGuard { inner, shard, key })
     }
 
+    pub fn get_owned(self: &Arc<Self>, key: usize) -> Option<OwnedPoolGuard<T, C>> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("-> :get_owned {:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.get_owned(key, |x| x)?;
+
+        Some(OwnedPoolGuard {
+            inner,
+            pool: self.clone(),
+            key,
+        })
+    }
     /// Remove the value using the storage associated with the given key from the pool, returning
     /// `true` if the value was removed.
     ///
@@ -297,6 +318,17 @@ where
             } else {
                 self.shard.mark_clear_remote(self.key);
             }
+        }
+    }
+}
+
+impl<T, C> Drop for OwnedPoolGuard<T, C> where T: Clear + Default, C: cfg::Config {
+    fn drop(&mut self) {
+        use crate::sync::atomic;
+        test_println!(" -> drop OwnedPoolGuard: clearing data");
+        if self.inner.release() {
+            atomic::fence(atomic::Ordering::Acquire);
+            self.pool.clear(self.key);
         }
     }
 }

@@ -26,7 +26,7 @@ pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
 pub(crate) struct OwnedGuard<T, C = cfg::DefaultConfig> {
     item: NonNull<T>,
     lifecycle: NonNull<AtomicUsize>,
-    _cfg: PhantomData<fn(C)>
+    _cfg: PhantomData<fn(C)>,
 }
 
 #[repr(transparent)]
@@ -575,12 +575,60 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
         OwnedGuard {
             item: self.item.into(),
             lifecycle: self.lifecycle.into(),
-            _cfg: PhantomData
+            _cfg: PhantomData,
         }
     }
 
     pub(crate) fn item(&self) -> &T {
         self.item
+    }
+}
+
+// === impl OwnedGuard ===
+
+impl<T, C: cfg::Config> OwnedGuard<T, C> {
+    pub(crate) fn release(&self) -> bool {
+        let mut lifecycle = unsafe {  self.lifecycle.as_ref() }.load(Ordering::Acquire);
+        loop {
+            let refs = RefCount::<C>::from_packed(lifecycle);
+            let state = Lifecycle::<C>::from_packed(lifecycle).state;
+            let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+
+            // Are we the last guard, and is the slot marked for removal?
+            let dropping = refs.value == 1 && state == State::Marked;
+            let new_lifecycle = if dropping {
+                // If so, we want to advance the state to "removing"
+                gen.pack(State::Removing as usize)
+            } else {
+                // Otherwise, just subtract 1 from the ref count.
+                refs.decr().pack(lifecycle)
+            };
+
+            test_println!(
+                "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
+                state,
+                gen,
+                refs,
+                lifecycle,
+                new_lifecycle,
+                dropping
+            );
+            match unsafe { self.lifecycle.as_ref() }.compare_exchange(
+                lifecycle,
+                new_lifecycle,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    test_println!("-> drop guard: done;  dropping={:?}", dropping);
+                    return dropping;
+                }
+                Err(actual) => {
+                    test_println!("-> drop guard; retry, actual={:#x}", actual);
+                    lifecycle = actual;
+                }
+            }
+        }
     }
 }
 

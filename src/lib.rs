@@ -237,6 +237,7 @@ pub use pool::{Pool, PoolGuard};
 use shard::Shard;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
+
 /// A sharded slab.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
@@ -489,6 +490,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
             key,
         })
     }
+
     /// Returns `true` if the slab contains a value for the given key.
     ///
     /// # Examples
@@ -565,6 +567,17 @@ impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
             } else {
                 self.shard.remove_remote(self.key);
             }
+        }
+    }
+}
+
+impl<T, C: cfg::Config> Drop for OwnedSlabGuard<T, C> {
+    fn drop(&mut self) {
+        use crate::sync::atomic;
+        test_println!(" -> drop OwnedSlabGuard: clearing data");
+        if self.inner.release() {
+            atomic::fence(atomic::Ordering::Acquire);
+            self.slab.remove(self.key);
         }
     }
 }
