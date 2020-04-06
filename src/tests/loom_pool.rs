@@ -177,3 +177,65 @@ fn clear_local_and_reuse() {
         assert!(pool.get(idx1).unwrap().capacity() >= 11);
     })
 }
+
+#[test]
+fn get_mut_basic() {
+    run_model("get_mut_basic", || {
+        let pool = Arc::new(Pool::new());
+
+        let idx1 = pool
+            .create(|item: &mut String| {
+                item.push_str("hello world");
+            })
+            .expect("create");
+        let pool2 = pool.clone();
+        let t1 = thread::spawn(move || {
+            let v = pool2.get(idx1);
+            if let Some(v) = v {
+                assert_eq!(v, String::from("hello world"))
+            }
+        });
+
+        let pool2 = pool.clone();
+        let t2 = thread::spawn(move || {
+            let v = pool2.get(idx1);
+            if let Some(v) = v {
+                assert_eq!(v, String::from("hello world"))
+            }
+        });
+        let _mut = pool.get_mut(idx1);
+        t1.join().unwrap();
+        t2.join().unwrap();
+    })
+}
+
+#[test]
+fn get_mut_contended() {
+    run_model("get_mut_contended", || {
+        let pool = Arc::new(Pool::new());
+
+        let idx1 = pool
+            .create(|item: &mut String| {
+                item.push_str("hello world");
+            })
+            .expect("create");
+        let pool2 = pool.clone();
+        let t1 = thread::spawn(move || {
+            let v = pool2.get_mut(idx1);
+            if let Ok(v) = v {
+                assert_eq!(v, String::from("hello world"))
+            }
+        });
+
+        let pool2 = pool.clone();
+        let t2 = thread::spawn(move || {
+            let v = pool2.get_mut(idx1);
+            if let Ok(v) = v {
+                assert_eq!(v, String::from("hello world"))
+            }
+        });
+        let _mut = pool.get_mut(idx1);
+        t1.join().unwrap();
+        t2.join().unwrap();
+    })
+}
