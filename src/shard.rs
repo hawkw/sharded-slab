@@ -48,11 +48,11 @@ where
     C: cfg::Config,
 {
     #[inline(always)]
-    pub(crate) fn get<U>(
-        &self,
+    pub(crate) fn with_slot<'a, U>(
+        &'a self,
         idx: usize,
-        f: impl FnOnce(&T) -> &U,
-    ) -> Option<page::slot::Guard<'_, U, C>> {
+        f: impl FnOnce(&'a page::Slot<T, C>) -> Option<U>,
+    ) -> Option<U> {
         debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
@@ -61,7 +61,7 @@ where
             return None;
         }
 
-        self.shared[page_index].get(addr, idx, f)
+        self.shared[page_index].with_slot(addr, f)
     }
 
     pub(crate) fn new(tid: usize) -> Self {

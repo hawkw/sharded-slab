@@ -99,7 +99,25 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    inner: page::slot::Guard<'a, T, C>,
+    inner: page::slot::Guard<'a, &'a T, C>,
+    shard: &'a Shard<T, C>,
+    key: usize,
+}
+
+
+/// A guard that allows exclusive mutable access to an object in a pool.
+///
+/// While the guard exists, it indicates to the pool that the item the guard
+/// references is currently being accessed. If the item is removed from the pool
+/// while a guard exists, the removal will be deferred until the guard is
+/// dropped. The slot cannot be accessed by other threads while it is accessed
+/// mutably. 
+pub struct PoolGuardMut<'a, T, C = DefaultConfig>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    inner: page::slot::Guard<'a, &'a mut T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
@@ -167,9 +185,23 @@ where
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.get(key, |x| x)?;
-
+        let inner = shard.with_slot(key, |slot| {
+            slot.get(C::unpack_gen(key), |x| x)
+        })?;
         Some(PoolGuard { inner, shard, key })
+    }
+
+
+    pub fn get_mut(&self, key: usize) -> Result<PoolGuardMut<'_, T, C>, crate::GetMutError> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("pool: get_mut {:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize()).ok_or(crate::GetMutError::NONEXISTENT)?;
+        let inner = shard.with_slot(key, |slot| {
+            Some(slot.get_mut(C::unpack_gen(key), |x| x))
+        }).ok_or(crate::GetMutError::NONEXISTENT)??;
+
+        Ok(PoolGuardMut { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
@@ -318,6 +350,79 @@ where
 {
     fn eq(&self, other: &T) -> bool {
         *self.inner.item() == *other
+    }
+}
+
+// === impl GuardMut ===
+
+impl<'a, T, C: cfg::Config> PoolGuardMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config, 
+{
+    /// Returns the key used to access the guard.
+    pub fn key(&self) -> usize {
+        self.key
+    }
+}
+
+impl<'a, T, C: cfg::Config> std::ops::Deref for PoolGuardMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config, 
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.item()
+    }
+}
+
+impl<'a, T, C> std::ops::DerefMut for PoolGuardMut<'a, T, C>
+where
+T: Clear + Default,
+C: cfg::Config, 
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.item_mut()
+    }
+}
+
+impl<'a, T, C> Drop for PoolGuardMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config, 
+{
+    fn drop(&mut self) {
+        use crate::sync::atomic;
+        if self.inner.release() {
+            atomic::fence(atomic::Ordering::Acquire);
+            if Tid::<C>::current().as_usize() == self.shard.tid {
+                self.shard.mark_clear_local(self.key);
+            } else {
+                self.shard.mark_clear_remote(self.key);
+            }
+        }
+    }
+}
+
+impl<'a, T, C> fmt::Debug for PoolGuardMut<'a, T, C>
+where
+    T: fmt::Debug + Clear + Default,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner.item(), f)
+    }
+}
+
+impl<'a, T, C> PartialEq<T> for PoolGuardMut<'a, T, C>
+where
+    T: PartialEq<T> + Clear + Default,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.inner.item().eq(other)
     }
 }
 

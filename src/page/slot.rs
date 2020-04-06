@@ -17,7 +17,7 @@ pub(crate) struct Slot<T, C> {
 
 #[derive(Debug)]
 pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
-    item: &'a T,
+    item: T,
     lifecycle: &'a AtomicUsize,
     _cfg: PhantomData<fn(C)>,
 }
@@ -99,11 +99,81 @@ where
     }
 
     #[inline(always)]
-    pub(in crate::page) fn get<U>(
+    pub(crate) fn get_mut<U>(
         &self,
         gen: Generation<C>,
-        f: impl FnOnce(&T) -> &U,
-    ) -> Option<Guard<'_, U, C>> {
+        f: impl FnOnce(&mut T) -> &mut U,
+    ) -> Result<Guard<'_, &mut U, C>, crate::GetMutError> {
+        let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
+        loop {
+            // Unpack the current state.
+            let state = Lifecycle::<C>::from_packed(lifecycle);
+            let current_gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+            let refs = RefCount::<C>::from_packed(lifecycle);
+
+            test_println!(
+                "-> get_mut {:?}; current_gen={:?}; lifecycle={:#x}; state={:?}; refs={:?};",
+                gen,
+                current_gen,
+                lifecycle,
+                state,
+                refs,
+            );
+
+            // Is it okay to access this slot? The accessed generation must be
+            // current, and the slot must not be in the process of being
+            // removed. If we can no longer access the slot at the given
+            // generation, return `None`.
+            if gen != current_gen || state != Lifecycle::NOT_REMOVED {
+                test_println!("-> get_mut: no longer exists!");
+                return Err(crate::GetMutError::NONEXISTENT);
+            }
+
+            // Mark the slot for exclusive access.
+            let new_refs = refs.make_exclusive()?;
+            match self.lifecycle.compare_exchange(
+                lifecycle,
+                new_refs.pack(current_gen.pack(state.pack(0))),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    // Okay, the ref count was incremented successfully! We can
+                    // now return a guard!
+                    let item = self.item.with_mut(|value| unsafe {
+                        // Safety: the value will not be accessed while marked
+                        // exclusively.
+                        f(&mut *value)
+                    });
+
+                    test_println!("-> {:?}", new_refs);
+
+                    return Ok(Guard {
+                        item,
+                        lifecycle: &self.lifecycle,
+                        _cfg: PhantomData,
+                    });
+                }
+                Err(actual) => {
+                    // Another thread modified the slot's state before us! We
+                    // need to retry with the new state.
+                    //
+                    // Since the new state may mean that the accessed generation
+                    // is no longer valid, we'll check again on the next
+                    // iteration of the loop.
+                    test_println!("-> get_mut: retrying; lifecycle={:#x};", actual);
+                    lifecycle = actual;
+                }
+            };
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get<'a, U>(
+        &'a self,
+        gen: Generation<C>,
+        f: impl FnOnce(&'a T) -> &'a U,
+    ) -> Option<Guard<'a, &'a U, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -129,17 +199,8 @@ where
                 return None;
             }
 
-            // Would incrementing the ref count cause an overflow?
-            if refs.value >= RefCount::<C>::MAX {
-                test_println!(
-                    "-> get: max concurrent references ({}) reached!",
-                    RefCount::<C>::MAX
-                );
-                return None;
-            }
-
             // Try to increment the slot's ref count by one.
-            let new_refs = refs.incr();
+            let new_refs = refs.incr()?;
             match self.lifecycle.compare_exchange(
                 lifecycle,
                 new_refs.pack(current_gen.pack(state.pack(0))),
@@ -526,7 +587,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
             let refs = RefCount::<C>::from_packed(lifecycle);
             let state = Lifecycle::<C>::from_packed(lifecycle).state;
             let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
-
+    
             // Are we the last guard, and is the slot marked for removal?
             let dropping = refs.value == 1 && state == State::Marked;
             let new_lifecycle = if dropping {
@@ -536,7 +597,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
                 // Otherwise, just subtract 1 from the ref count.
                 refs.decr().pack(lifecycle)
             };
-
+    
             test_println!(
                 "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
                 state,
@@ -563,8 +624,16 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
             }
         }
     }
+}
 
-    pub(crate) fn item(&self) -> &T {
+impl<'a, T: std::ops::Deref, C: cfg::Config> Guard<'a, T, C> {
+    pub(crate) fn item(&self) -> &T::Target {
+        &*self.item
+    }
+}
+
+impl<'a, T, C: cfg::Config> Guard<'a, &'a mut T, C> {
+    pub(crate) fn item_mut(&mut self) -> &mut T {
         self.item
     }
 }
@@ -625,7 +694,7 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
     type Prev = Lifecycle<C>;
 
     fn from_usize(value: usize) -> Self {
-        debug_assert!(value <= Self::MAX);
+        debug_assert!(value <= Self::BITS);
         Self {
             value,
             _cfg: PhantomData,
@@ -638,24 +707,48 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 }
 
 impl<C: cfg::Config> RefCount<C> {
-    pub(crate) const MAX: usize = Self::BITS;
+    pub(crate) const MAX: usize = Self::BITS - 1;
+
+    const EXCLUSIVE: Self = Self {
+        value: Self::BITS,
+        _cfg: PhantomData,
+    };
 
     #[inline]
-    fn incr(self) -> Self {
-        // It's okay for this to be a debug assertion, because the check in
-        // `Slot::get` should protect against incrementing the reference count
-        // if it would overflow. This is intended to test that the check is in
-        // place.
-        debug_assert!(
-            self.value < Self::MAX,
-            "incrementing ref count would overflow max value ({})",
-            Self::MAX
-        );
-        Self::from_usize(self.value + 1)
+    fn is_exclusive(self) -> bool {
+        self == Self::EXCLUSIVE
+    }
+
+    fn make_exclusive(self) -> Result<Self, crate::GetMutError> {
+        if self.value == 0 {
+            return Ok(Self::EXCLUSIVE);
+        }
+        Err(crate::GetMutError::BORROWED)
+    }
+
+    #[inline]
+    fn incr(self) -> Option<Self> {
+        if self.value >= Self::MAX {
+            test_println!(
+                "-> get: {}; MAX={}",
+                if self.is_exclusive() {
+                    "slot is locked exclusively"
+                } else {
+                    "max concurrent references reached"
+                },
+                RefCount::<C>::MAX
+            );
+            return None;
+        }
+
+        Some(Self::from_usize(self.value + 1))
     }
 
     #[inline]
     fn decr(self) -> Self {
+        if self.is_exclusive() {
+            return Self::from_usize(0);
+        }
         Self::from_usize(self.value - 1)
     }
 }

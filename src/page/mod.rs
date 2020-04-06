@@ -5,7 +5,7 @@ use crate::Pack;
 
 pub(crate) mod slot;
 mod stack;
-use self::slot::Slot;
+pub(crate) use self::slot::Slot;
 use std::{fmt, marker::PhantomData};
 
 /// A page address encodes the location of a slot within a shard (the page
@@ -175,21 +175,20 @@ where
     }
 
     #[inline]
-    pub(crate) fn get<U>(
-        &self,
+    pub(crate) fn with_slot<'a, U>(
+        &'a self,
         addr: Addr<C>,
-        idx: usize,
-        f: impl FnOnce(&T) -> &U,
-    ) -> Option<slot::Guard<'_, U, C>> {
+        f: impl FnOnce(&'a Slot<T, C>) -> Option<U>,
+    ) -> Option<U> {
         let poff = addr.offset() - self.prev_sz;
 
         test_println!("-> offset {:?}", poff);
 
         self.slab.with(|slab| {
-            unsafe { &*slab }
+            let slot = unsafe { &*slab }
                 .as_ref()?
-                .get(poff)?
-                .get(C::unpack_gen(idx), f)
+                .get(poff)?;
+            f(slot)
         })
     }
 
