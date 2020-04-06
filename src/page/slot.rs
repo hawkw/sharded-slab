@@ -588,6 +588,8 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
 
 impl<T, C: cfg::Config> OwnedGuard<T, C> {
     pub(crate) fn release(&self) -> bool {
+        // safety: Safe to access this as we are accessing an AtomicUsize on which we are
+        // only performing reads.
         let mut lifecycle = unsafe { self.lifecycle.as_ref() }.load(Ordering::Acquire);
         loop {
             let refs = RefCount::<C>::from_packed(lifecycle);
@@ -613,6 +615,7 @@ impl<T, C: cfg::Config> OwnedGuard<T, C> {
                 new_lifecycle,
                 dropping
             );
+            // safety: Safe as we are performing an atomic operation on an `AtomicUsize`
             match unsafe { self.lifecycle.as_ref() }.compare_exchange(
                 lifecycle,
                 new_lifecycle,
@@ -632,6 +635,8 @@ impl<T, C: cfg::Config> OwnedGuard<T, C> {
     }
 
     pub(crate) fn item(&self) -> &T {
+        // safety: Safe to read read this value as no other thread can access this for
+        // modificiation while the gaurd is alive.
         unsafe { self.item.as_ref() }
     }
 }
