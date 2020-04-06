@@ -113,6 +113,32 @@ fn take_local() {
     });
 }
 
+mod owned_guard {
+    use std::sync::Arc;
+    use super::*;
+
+    #[test]
+    fn store_guard_on_heap() {
+        run_model("store_guard_on_heap", || {
+            let slab = Arc::new(Slab::new());
+
+            let idx = slab.insert(10).unwrap();
+            let guard = slab.get_owned(idx).unwrap();
+
+            let boxed_guard = Box::new(guard);
+
+            let t1 = thread::spawn(move || {
+                drop(boxed_guard);
+            });
+
+            t1.join().expect("thread 1 should not panic");
+
+            slab.remove(idx);
+            assert!(slab.get(idx).is_none());
+        })
+    }
+}
+
 #[test]
 fn take_remote() {
     run_model("take_remote", || {

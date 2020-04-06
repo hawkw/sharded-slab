@@ -630,6 +630,10 @@ impl<T, C: cfg::Config> OwnedGuard<T, C> {
             }
         }
     }
+
+    pub(crate) fn item(&self) -> &T {
+        unsafe { self.item.as_ref() }
+    }
 }
 
 // === impl Lifecycle ===

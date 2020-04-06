@@ -582,6 +582,14 @@ impl<T, C: cfg::Config> Drop for OwnedSlabGuard<T, C> {
     }
 }
 
+impl<T, C: cfg::Config> std::ops::Deref for OwnedSlabGuard<T, C> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.item()
+    }
+}
+
 impl<'a, T, C> fmt::Debug for Guard<'a, T, C>
 where
     T: fmt::Debug,
