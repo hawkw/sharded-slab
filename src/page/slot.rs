@@ -588,7 +588,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
 
 impl<T, C: cfg::Config> OwnedGuard<T, C> {
     pub(crate) fn release(&self) -> bool {
-        let mut lifecycle = unsafe {  self.lifecycle.as_ref() }.load(Ordering::Acquire);
+        let mut lifecycle = unsafe { self.lifecycle.as_ref() }.load(Ordering::Acquire);
         loop {
             let refs = RefCount::<C>::from_packed(lifecycle);
             let state = Lifecycle::<C>::from_packed(lifecycle).state;

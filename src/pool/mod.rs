@@ -3,7 +3,7 @@ use crate::{
     clear::Clear,
     page,
     tid::Tid,
-    Pack, Shard
+    Pack, Shard,
 };
 
 use std::{fmt, marker::PhantomData, sync::Arc};
@@ -322,7 +322,11 @@ where
     }
 }
 
-impl<T, C> Drop for OwnedPoolGuard<T, C> where T: Clear + Default, C: cfg::Config {
+impl<T, C> Drop for OwnedPoolGuard<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
     fn drop(&mut self) {
         use crate::sync::atomic;
         test_println!(" -> drop OwnedPoolGuard: clearing data");
@@ -333,7 +337,11 @@ impl<T, C> Drop for OwnedPoolGuard<T, C> where T: Clear + Default, C: cfg::Confi
     }
 }
 
-impl<T, C> std::ops::Deref for OwnedPoolGuard<T, C> where T: Clear + Default, C: cfg::Config {
+impl<T, C> std::ops::Deref for OwnedPoolGuard<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {

@@ -237,7 +237,6 @@ pub use pool::{Pool, PoolGuard};
 use shard::Shard;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
-
 /// A sharded slab.
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.

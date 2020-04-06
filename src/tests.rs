@@ -114,8 +114,8 @@ fn take_local() {
 }
 
 mod owned_guard {
-    use std::sync::Arc;
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn store_guard_on_heap() {
