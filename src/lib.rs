@@ -262,7 +262,7 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until the guard is
 /// dropped. The slot cannot be accessed by other threads while it is accessed
-/// mutably. 
+/// mutably.
 pub struct GuardMut<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, &'a mut T, C>,
     shard: &'a Shard<Option<T>, C>,
@@ -278,7 +278,7 @@ pub struct GetMutError {
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum GetMutErrorKind {
     Nonexistent,
-    InUse
+    InUse,
 }
 
 impl<T> Slab<T> {
@@ -497,14 +497,19 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(key);
 
         test_println!("get_mut {:?}; current={:?}", tid, Tid::<C>::current());
-        let shard = self.shards.get(tid.as_usize()).ok_or(GetMutError::NONEXISTENT)?;
-        let inner = shard.with_slot(key, |slot| {
-            Some(slot.get_mut(C::unpack_gen(key), |x| {
-                x.as_mut().expect(
+        let shard = self
+            .shards
+            .get(tid.as_usize())
+            .ok_or(GetMutError::NONEXISTENT)?;
+        let inner = shard
+            .with_slot(key, |slot| {
+                Some(slot.get_mut(C::unpack_gen(key), |x| {
+                    x.as_mut().expect(
                     "if a slot can be accessed at the current generation, its value must be `Some`",
                 )
-            }))
-        }).ok_or(GetMutError::NONEXISTENT)??;
+                }))
+            })
+            .ok_or(GetMutError::NONEXISTENT)??;
 
         Ok(GuardMut { inner, shard, key })
     }
@@ -622,7 +627,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for GuardMut<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-         self.inner.item()
+        self.inner.item()
     }
 }
 
@@ -666,7 +671,7 @@ where
     }
 }
 
-// === impl GetMutError === 
+// === impl GetMutError ===
 
 impl fmt::Display for GetMutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -680,8 +685,12 @@ impl fmt::Display for GetMutError {
 impl std::error::Error for GetMutError {}
 
 impl GetMutError {
-    pub(crate) const BORROWED: Self = Self { kind: GetMutErrorKind::InUse, };
-    pub(crate) const NONEXISTENT: Self = Self { kind: GetMutErrorKind::Nonexistent, };
+    pub(crate) const BORROWED: Self = Self {
+        kind: GetMutErrorKind::InUse,
+    };
+    pub(crate) const NONEXISTENT: Self = Self {
+        kind: GetMutErrorKind::Nonexistent,
+    };
 
     pub fn is_borrowed(&self) -> bool {
         match self.kind {

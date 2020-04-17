@@ -587,7 +587,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
             let refs = RefCount::<C>::from_packed(lifecycle);
             let state = Lifecycle::<C>::from_packed(lifecycle).state;
             let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
-    
+
             // Are we the last guard, and is the slot marked for removal?
             let dropping = refs.value == 1 && state == State::Marked;
             let new_lifecycle = if dropping {
@@ -597,7 +597,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
                 // Otherwise, just subtract 1 from the ref count.
                 refs.decr().pack(lifecycle)
             };
-    
+
             test_println!(
                 "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
                 state,

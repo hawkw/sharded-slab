@@ -614,15 +614,12 @@ mod free_list_reuse {
     }
 }
 
-
 #[test]
 fn get_mut_basic() {
     run_model("get_mut_basic", || {
         let slab = Arc::new(Slab::new());
 
-        let idx1 = slab
-            .insert(String::from("hello world"))
-            .expect("create");
+        let idx1 = slab.insert(String::from("hello world")).expect("create");
         let slab2 = slab.clone();
         let t1 = thread::spawn(move || {
             let v = slab2.get(idx1);
@@ -649,9 +646,7 @@ fn get_mut_contended() {
     run_model("get_mut_contended", || {
         let slab = Arc::new(Slab::new());
 
-        let idx1 = slab
-            .insert(String::from("hello world"))
-            .expect("create");
+        let idx1 = slab.insert(String::from("hello world")).expect("create");
         let slab2 = slab.clone();
         let t1 = thread::spawn(move || {
             let v = slab2.get_mut(idx1);

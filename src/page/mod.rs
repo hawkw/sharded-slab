@@ -185,9 +185,7 @@ where
         test_println!("-> offset {:?}", poff);
 
         self.slab.with(|slab| {
-            let slot = unsafe { &*slab }
-                .as_ref()?
-                .get(poff)?;
+            let slot = unsafe { &*slab }.as_ref()?.get(poff)?;
             f(slot)
         })
     }

@@ -104,14 +104,13 @@ where
     key: usize,
 }
 
-
 /// A guard that allows exclusive mutable access to an object in a pool.
 ///
 /// While the guard exists, it indicates to the pool that the item the guard
 /// references is currently being accessed. If the item is removed from the pool
 /// while a guard exists, the removal will be deferred until the guard is
 /// dropped. The slot cannot be accessed by other threads while it is accessed
-/// mutably. 
+/// mutably.
 pub struct PoolGuardMut<'a, T, C = DefaultConfig>
 where
     T: Clear + Default,
@@ -185,21 +184,21 @@ where
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.with_slot(key, |slot| {
-            slot.get(C::unpack_gen(key), |x| x)
-        })?;
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key), |x| x))?;
         Some(PoolGuard { inner, shard, key })
     }
-
 
     pub fn get_mut(&self, key: usize) -> Result<PoolGuardMut<'_, T, C>, crate::GetMutError> {
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get_mut {:?}; current={:?}", tid, Tid::<C>::current());
-        let shard = self.shards.get(tid.as_usize()).ok_or(crate::GetMutError::NONEXISTENT)?;
-        let inner = shard.with_slot(key, |slot| {
-            Some(slot.get_mut(C::unpack_gen(key), |x| x))
-        }).ok_or(crate::GetMutError::NONEXISTENT)??;
+        let shard = self
+            .shards
+            .get(tid.as_usize())
+            .ok_or(crate::GetMutError::NONEXISTENT)?;
+        let inner = shard
+            .with_slot(key, |slot| Some(slot.get_mut(C::unpack_gen(key), |x| x)))
+            .ok_or(crate::GetMutError::NONEXISTENT)??;
 
         Ok(PoolGuardMut { inner, shard, key })
     }
@@ -358,7 +357,7 @@ where
 impl<'a, T, C: cfg::Config> PoolGuardMut<'a, T, C>
 where
     T: Clear + Default,
-    C: cfg::Config, 
+    C: cfg::Config,
 {
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
@@ -369,7 +368,7 @@ where
 impl<'a, T, C: cfg::Config> std::ops::Deref for PoolGuardMut<'a, T, C>
 where
     T: Clear + Default,
-    C: cfg::Config, 
+    C: cfg::Config,
 {
     type Target = T;
 
@@ -380,8 +379,8 @@ where
 
 impl<'a, T, C> std::ops::DerefMut for PoolGuardMut<'a, T, C>
 where
-T: Clear + Default,
-C: cfg::Config, 
+    T: Clear + Default,
+    C: cfg::Config,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.item_mut()
@@ -391,7 +390,7 @@ C: cfg::Config,
 impl<'a, T, C> Drop for PoolGuardMut<'a, T, C>
 where
     T: Clear + Default,
-    C: cfg::Config, 
+    C: cfg::Config,
 {
     fn drop(&mut self) {
         use crate::sync::atomic;
