@@ -50,6 +50,62 @@ fn take_local() {
 }
 
 #[test]
+fn get_mut_local() {
+    run_model("get_mut_local", || {
+        let slab = Arc::new(Slab::new());
+        let pair = Arc::new((Mutex::new(None), Condvar::new()));
+
+        let idx = slab.insert(1).expect("insert");
+        assert_eq!(slab.get_mut(idx).unwrap(), 1);
+
+        let s = slab.clone();
+        let pair1 = pair.clone();
+        let t1 = thread::spawn(move || {
+            let (lock, cvar) = &*pair1;
+
+            let guard = s.get(idx);
+
+            {
+                // Let the other thread try to get mutable access after we have immutable access
+                let mut next = lock.lock().unwrap();
+                *next = Some(());
+                cvar.notify_one();
+            }
+
+            let mut next = lock.lock().unwrap();
+            // wait until other thread has mutable access before dropping guard
+            while next.is_some() {
+                next = cvar.wait(next).unwrap();
+            }
+
+            drop(guard);
+        });
+
+        let (lock, cvar) = &*pair;
+
+        {
+            let mut next = lock.lock().unwrap();
+            // wait until the other thread has gained immutable access
+            while next.is_none() {
+                next = cvar.wait(next).unwrap();
+            }
+        }
+
+        let guard = slab.get_mut(idx);
+        assert!(guard.is_err());
+
+        let mut next = lock.lock().unwrap();
+        *next = None;
+        // notify once we have tried and errored out
+        cvar.notify_one();
+
+        // Make sure to drop mutex guard so the other thread can make progress
+        drop(next);
+        t1.join().expect("thread 1 should not panic");
+    })
+}
+
+#[test]
 fn take_remote() {
     run_model("take_remote", || {
         let slab = Arc::new(Slab::new());
