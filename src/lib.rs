@@ -487,6 +487,26 @@ impl<T, C: cfg::Config> Slab<T, C> {
         Some(Guard { inner, shard, key })
     }
 
+    /// Return a mutable reference to the value associated with the given key.
+    ///
+    /// If the value is already in use, this method will return `GetMutError::INUSE`. If the key
+    /// points to a non existant value, it will return `GetMutError::NONEXISTENT`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let slab = sharded_slab::Slab::new();
+    /// let key = slab.insert("Hello world").unwrap();
+    ///
+    /// {
+    /// let mut value = slab.get_mut(key).unwrap();
+    /// assert_eq!(value, "Hello world");
+    ///
+    /// *value = "Mutable access!";
+    /// }
+    ///
+    /// assert_eq!(slab.get(key).unwrap(), "Mutable access!");
+    /// ```
     pub fn get_mut(&self, key: usize) -> Result<GuardMut<'_, T, C>, GetMutError> {
         let tid = C::unpack_tid(key);
 
