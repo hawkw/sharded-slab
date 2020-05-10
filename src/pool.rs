@@ -188,6 +188,27 @@ where
         Some(PoolGuard { inner, shard, key })
     }
 
+    /// Return a mutable reference to the value associated with the given key.
+    ///
+    /// If the value is already in use, this method will return `GetMutError::INUSE`. If the key
+    /// points to a non existant value, it will return `GetMutError::NONEXISTENT`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// let pool: Pool<String> = sharded_slab::Pool::new();
+    /// let key = pool.create(|item| item.push_str("Hello world")).unwrap();
+    ///
+    /// {
+    /// let mut value = pool.get_mut(key).unwrap();
+    /// assert_eq!(value, String::from("Hello world"));
+    ///
+    /// *value = "Mutable access!".to_string();
+    /// }
+    ///
+    /// assert_eq!(pool.get(key).unwrap(), String::from("Mutable access!"));
+    /// ```
     pub fn get_mut(&self, key: usize) -> Result<PoolGuardMut<'_, T, C>, crate::GetMutError> {
         let tid = C::unpack_tid(key);
 
