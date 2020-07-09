@@ -77,6 +77,10 @@ where
         let local = (0..C::MAX_PAGES).map(|_| page::Local::new()).collect();
         Self { tid, local, shared }
     }
+
+    pub(crate) fn tid(&self) -> Tid<C> {
+        Tid::from_usize(self.tid)
+    }
 }
 
 impl<T, C> Shard<Option<T>, C>

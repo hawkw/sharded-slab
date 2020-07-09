@@ -63,9 +63,16 @@ impl<C: cfg::Config> Pack<C> for Addr<C> {
     }
 }
 
-pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
+pub(crate) type IterUnique<'a, T, C> = std::iter::FilterMap<
     std::slice::Iter<'a, Slot<Option<T>, C>>,
     fn(&'a Slot<Option<T>, C>) -> Option<&'a T>,
+>;
+
+pub(crate) type Iter<'a, T, C> = std::iter::FilterMap<
+    std::iter::Enumerate<std::slice::Iter<'a, Slot<Option<T>, C>>>,
+    fn(
+        (usize, &'a Slot<Option<T>, C>),
+    ) -> Option<(usize, slot::Guard<'a, T, C>, slot::Generation<C>)>,
 >;
 
 pub(crate) struct Local {
@@ -250,11 +257,31 @@ where
         slot.value().as_ref()
     }
 
-    pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+    pub(crate) fn iter_unique(&self) -> Option<IterUnique<'a, T, C>> {
         let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
         slab.map(|slab| {
             slab.iter()
                 .filter_map(Shared::make_ref as fn(&'a Slot<Option<T>, C>) -> Option<&'a T>)
+        })
+    }
+
+    pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        slab.map(|slab| {
+            slab.iter().enumerate().filter_map(
+                (|(idx, slot): (usize, &'a Slot<Option<T>, C>)| {
+                    let (guard, gen) = slot.snapshot(|x| {
+                        x.as_ref().expect(
+                "if a slot can be accessed at the current generation, its value must be `Some`",
+            )
+                    })?;
+                    Some((idx, guard, gen))
+                })
+                    as fn(
+                        (usize, &'a Slot<Option<T>, C>),
+                    )
+                        -> Option<(usize, slot::Guard<'a, T, C>, slot::Generation<C>)>,
+            )
         })
     }
 }
@@ -332,6 +359,10 @@ where
                 false
             }
         })
+    }
+
+    pub(crate) fn prev_sz(&self) -> usize {
+        self.prev_sz
     }
 }
 

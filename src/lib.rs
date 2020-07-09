@@ -251,9 +251,9 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, T, C>,
-    shard: &'a Shard<Option<T>, C>,
-    key: usize,
+    pub(crate) inner: page::slot::Guard<'a, T, C>,
+    pub(crate) shard: &'a Shard<Option<T>, C>,
+    pub(crate) key: usize,
 }
 
 impl<T> Slab<T> {
@@ -488,9 +488,25 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let mut shards = self.shards.iter_mut();
         let shard = shards.next().expect("must be at least 1 shard");
         let mut pages = shard.iter();
-        let slots = pages.next().and_then(page::Shared::iter);
+        let slots = pages.next().and_then(page::Shared::iter_unique);
         iter::UniqueIter {
             shards,
+            slots,
+            pages,
+        }
+    }
+
+    pub fn iter(&self) -> iter::Iter<'_, T, C> {
+        let mut shards = self.shards.iter();
+        let current_shard = shards.next().expect("must be at least 1 shard");
+        let mut pages = current_shard.iter();
+        let page = pages.next();
+        let current_page_sz = page.map(page::Shared::prev_sz).unwrap_or(0);
+        let slots = pages.next().and_then(page::Shared::iter);
+        iter::Iter {
+            shards,
+            current_shard,
+            current_page_sz,
             slots,
             pages,
         }

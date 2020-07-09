@@ -104,7 +104,28 @@ where
         gen: Generation<C>,
         f: impl FnOnce(&T) -> &U,
     ) -> Option<Guard<'_, U, C>> {
-        let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
+        let lifecycle = self.lifecycle.load(Ordering::Acquire);
+        self.checkout_guard(gen, lifecycle, f)
+    }
+
+    #[inline(always)]
+    pub(in crate::page) fn snapshot<U>(
+        &self,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<(Guard<'_, U, C>, Generation<C>)> {
+        let lifecycle = self.lifecycle.load(Ordering::Acquire);
+        let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+        let guard = self.checkout_guard(gen, lifecycle, f)?;
+        Some((guard, gen))
+    }
+
+    #[inline(always)]
+    fn checkout_guard<U>(
+        &self,
+        gen: Generation<C>,
+        mut lifecycle: usize,
+        f: impl FnOnce(&T) -> &U,
+    ) -> Option<Guard<'_, U, C>> {
         loop {
             // Unpack the current state.
             let state = Lifecycle::<C>::from_packed(lifecycle);
