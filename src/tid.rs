@@ -1,19 +1,18 @@
 use crate::{
     cfg::{self, CfgPrivate},
-    page, Pack,
+    page,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        lazy_static, thread_local, Mutex,
+    },
+    Pack,
 };
 use std::{
     cell::{Cell, UnsafeCell},
     collections::VecDeque,
     fmt,
     marker::PhantomData,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
-    },
 };
-
-use lazy_static::lazy_static;
 
 /// Uniquely identifies a thread.
 pub(crate) struct Tid<C> {
@@ -36,6 +35,7 @@ lazy_static! {
         free: Mutex::new(VecDeque::new()),
     };
 }
+
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
 }
@@ -164,6 +164,12 @@ impl Registration {
     }
 }
 
+// Reusing thread IDs doesn't work under loom, since this `Drop` impl results in
+// an access to a `loom` lazy_static while the test is shutting down, which
+// panics. T_T
+// Just skip TID reuse and use loom's lazy_static macro to ensure we have a
+// clean initial TID on every iteration, instead.
+#[cfg(not(test))]
 impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(id) = self.0.get() {
