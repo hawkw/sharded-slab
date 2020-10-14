@@ -2,7 +2,9 @@ pub(crate) use self::inner::*;
 
 #[cfg(loom)]
 mod inner {
-    pub(crate) use loom::cell::UnsafeCell;
+    pub(crate) use loom::lazy_static;
+    pub(crate) use loom::sync::Mutex;
+    pub(crate) use loom::{alloc, cell::UnsafeCell};
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
@@ -15,14 +17,14 @@ mod inner {
 
 #[cfg(not(loom))]
 mod inner {
+    #![allow(dead_code)]
     pub(crate) use lazy_static::lazy_static;
-    pub(crate) use std::sync::atomic;
-    pub(crate) use std::sync::Mutex;
+    pub(crate) use std::sync::{atomic, Mutex};
     pub(crate) use std::thread::yield_now;
     pub(crate) use std::thread_local;
 
     #[derive(Debug)]
-    pub struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
+    pub(crate) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
 
     impl<T> UnsafeCell<T> {
         pub fn new(data: T) -> UnsafeCell<T> {
@@ -43,6 +45,40 @@ mod inner {
             F: FnOnce(*mut T) -> R,
         {
             f(self.0.get())
+        }
+    }
+
+    pub(crate) mod alloc {
+        /// Track allocations, detecting leaks
+        #[derive(Debug)]
+        pub struct Track<T> {
+            value: T,
+        }
+
+        impl<T> Track<T> {
+            /// Track a value for leaks
+            #[inline(always)]
+            pub fn new(value: T) -> Track<T> {
+                Track { value }
+            }
+
+            /// Get a reference to the value
+            #[inline(always)]
+            pub fn get_ref(&self) -> &T {
+                &self.value
+            }
+
+            /// Get a mutable reference to the value
+            #[inline(always)]
+            pub fn get_mut(&mut self) -> &mut T {
+                &mut self.value
+            }
+
+            /// Stop tracking the value for leaks
+            #[inline(always)]
+            pub fn into_inner(self) -> T {
+                self.value
+            }
         }
     }
 }

@@ -2,11 +2,20 @@ use crate::{
     cfg::{self, CfgPrivate},
     clear::Clear,
     page,
+    sync::{
+        alloc,
+        atomic::{AtomicPtr, AtomicUsize, Ordering::*},
+    },
     tid::Tid,
     Pack,
 };
 
-use std::fmt;
+use std::{fmt, ptr};
+
+pub(crate) struct Array<T, C: cfg::Config> {
+    shards: Box<[AtomicPtr<alloc::Track<Shard<T, C>>>]>,
+    max: AtomicUsize,
+}
 
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
@@ -202,5 +211,112 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
         #[cfg(debug_assertions)]
         d.field("tid", &self.tid);
         d.field("shared", &self.shared).finish()
+    }
+}
+
+impl<T, C> Array<T, C>
+where
+    C: cfg::Config,
+{
+    pub(crate) fn new() -> Self {
+        let mut shards = Vec::with_capacity(C::MAX_SHARDS);
+        for _ in 0..C::MAX_SHARDS {
+            // XXX(eliza): T_T this could be avoided with maybeuninit or something...
+            shards.push(AtomicPtr::new(ptr::null_mut()));
+        }
+        Self {
+            shards: shards.into(),
+            max: AtomicUsize::new(0),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get<'a>(&'a self, idx: usize) -> Option<&'a Shard<T, C>> {
+        let ptr = self.shards.get(idx)?.load(Acquire);
+        let ptr = ptr::NonNull::new(ptr)?;
+        let shard = unsafe {
+            // Safety: the returned pointer will not outlive the shards array.
+            &*ptr.as_ptr()
+        };
+        Some(shard.get_ref())
+    }
+
+    #[inline]
+    pub(crate) fn current<'a>(&'a self) -> (Tid<C>, &'a Shard<T, C>) {
+        let tid = Tid::<C>::current();
+        test_println!("current: {:?}", tid);
+        let idx = tid.as_usize();
+        // It's okay for this to be relaxed. The value is only ever stored by
+        // the thread that corresponds to the index, and we are that thread.
+        let ptr = self.shards[idx].load(Relaxed);
+        let shard = ptr::NonNull::new(ptr)
+            .map(|shard| unsafe {
+                test_println!("-> shard exists");
+                // Safety: `NonNull::as_ref` is unsafe because it creates a
+                // reference with a potentially unbounded lifetime. However, the
+                // reference does not outlive this function, so it's fine to use it
+                // here.
+                &*shard.as_ptr()
+            })
+            .unwrap_or_else(|| {
+                let shard = Box::new(alloc::Track::new(Shard::new(idx)));
+                let ptr = Box::into_raw(shard);
+                test_println!("-> allocated new shard at {:p}", ptr);
+                self.shards[idx]
+                    .compare_exchange(ptr::null_mut(), ptr, AcqRel, Acquire)
+                    .expect(
+                        "a shard can only be inserted by the thread that owns it, this is a bug!",
+                    );
+
+                test_println!("-> ...and set shard {} to point to {:p}", idx, ptr);
+                let mut max = self.max.load(Acquire);
+                while max < idx {
+                    match self.max.compare_exchange(max, idx, AcqRel, Acquire) {
+                        Ok(_) => break,
+                        Err(actual) => max = actual,
+                    }
+                }
+                test_println!("-> highest index={}, prev={}", std::cmp::max(max, idx), max);
+                unsafe {
+                    // Safety: we just put it there!
+                    &*ptr
+                }
+            })
+            .get_ref();
+        (tid, shard)
+    }
+}
+
+impl<T, C: cfg::Config> Drop for Array<T, C> {
+    fn drop(&mut self) {
+        // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
+        let max = self.max.load(Acquire);
+        test_println!("Array::drop (max={})", max);
+        for shard in &self.shards[0..=max] {
+            // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
+            let ptr = shard.load(Acquire);
+            if ptr.is_null() {
+                continue;
+            }
+            let shard = unsafe {
+                // Safety: this is the only place where these boxes are
+                // deallocated, and we have exclusive access to the shard array,
+                // because...we are dropping it...
+                Box::from_raw(ptr)
+            };
+            test_println!("-> drop shard={:p}", shard);
+            drop(shard)
+        }
+    }
+}
+
+impl<T, C: cfg::Config> fmt::Debug for Array<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let max = self.max.load(Acquire);
+        let mut list = f.debug_list();
+        for shard in &self.shards[0..=max] {
+            list.entry(&format_args!("{:p}", shard.load(Acquire)));
+        }
+        list.finish()
     }
 }

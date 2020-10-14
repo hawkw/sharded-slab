@@ -330,7 +330,7 @@ where
         let actual = self
             .lifecycle
             .compare_and_swap(lifecycle, new_lifecycle, Ordering::AcqRel);
-        if actual != lifecycle {
+        if new_lifecycle != actual {
             // The slot was modified while we were inserting to it! It's no
             // longer safe to insert a new value.
             test_println!(
