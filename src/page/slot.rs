@@ -327,17 +327,20 @@ where
 
         // Set the slot's state to NOT_REMOVED.
         let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(0));
-        let actual = self
-            .lifecycle
-            .compare_and_swap(lifecycle, new_lifecycle, Ordering::AcqRel);
-        if new_lifecycle != actual {
+        let was_set = self.lifecycle.compare_exchange(
+            lifecycle,
+            new_lifecycle,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        if let Err(_actual) = was_set {
             // The slot was modified while we were inserting to it! It's no
             // longer safe to insert a new value.
             test_println!(
                 "-> modified during insert, cancelling! new={:#x}; expected={:#x}; actual={:#x};",
                 new_lifecycle,
                 lifecycle,
-                actual
+                _actual
             );
             return None;
         }
