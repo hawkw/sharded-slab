@@ -105,13 +105,13 @@ where
         f: impl FnOnce(&T) -> &U,
     ) -> Option<Guard<'_, U, C>> {
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
-        self.checkout_guard(gen, lifecycle, f)
+        self.checkout_guard(gen, lifecycle, |x| Some(f(x)))
     }
 
     #[inline(always)]
     pub(in crate::page) fn snapshot<U>(
         &self,
-        f: impl FnOnce(&T) -> &U,
+        f: impl FnOnce(&T) -> Option<&U>,
     ) -> Option<(Guard<'_, U, C>, Generation<C>)> {
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
         let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
@@ -124,7 +124,7 @@ where
         &self,
         gen: Generation<C>,
         mut lifecycle: usize,
-        f: impl FnOnce(&T) -> &U,
+        f: impl FnOnce(&T) -> Option<&U>,
     ) -> Option<Guard<'_, U, C>> {
         loop {
             // Unpack the current state.
@@ -170,7 +170,7 @@ where
                 Ok(_) => {
                     // Okay, the ref count was incremented successfully! We can
                     // now return a guard!
-                    let item = f(self.value());
+                    let item = f(self.value())?;
 
                     test_println!("-> {:?}", new_refs);
 
@@ -311,7 +311,7 @@ where
                     test_println!("-> refs={:?}; spin...", refs);
 
                     // Back off, spinning and possibly yielding.
-                    exponential_backoff(&mut spin_exp);
+                    crate::exponential_backoff(&mut spin_exp);
                 }
                 Err(actual) => {
                     test_println!("-> retrying; lifecycle={:#x};", actual);
@@ -727,27 +727,5 @@ impl<C: cfg::Config> Pack<C> for LifecycleGen<C> {
 
     fn as_usize(&self) -> usize {
         self.0.as_usize()
-    }
-}
-
-// === helpers ===
-
-#[inline(always)]
-fn exponential_backoff(exp: &mut usize) {
-    /// Maximum exponent we can back off to.
-    const MAX_EXPONENT: usize = 8;
-
-    // Issue 2^exp pause instructions.
-    for _ in 0..(1 << *exp) {
-        atomic::spin_loop_hint();
-    }
-
-    if *exp >= MAX_EXPONENT {
-        // If we have reached the max backoff, also yield to the scheduler
-        // explicitly.
-        crate::sync::yield_now();
-    } else {
-        // Otherwise, increment the exponent.
-        *exp += 1;
     }
 }

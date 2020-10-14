@@ -1,5 +1,4 @@
-use crate::{page, Shard};
-use std::iter;
+use crate::{page, Shard, Tid};
 use std::slice;
 
 pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
@@ -29,6 +28,7 @@ impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
 
             if let Some(page) = self.pages.next() {
                 self.slots = page.iter_unique();
+                continue;
             }
 
             if let Some(shard) = self.shards.next() {
@@ -54,18 +54,40 @@ where
                 let key = shard.tid().pack(
                     gen.pack(page::Addr::<C>::from_usize(idx + self.current_page_sz).pack(0)),
                 );
+                test_println!(
+                    "shard: {:?}; pg {} has ix {}",
+                    self.current_shard.tid(),
+                    self.current_page_sz,
+                    idx
+                );
                 return Some(crate::Guard { inner, shard, key });
+            } else {
+                test_println!(
+                    "shard: {:?}; pg {} empty",
+                    self.current_shard.tid(),
+                    self.current_page_sz
+                );
+                self.slots = None;
             }
 
             if let Some(page) = self.pages.next() {
                 self.current_page_sz = page.prev_sz();
+                // test_println!("SLOT ITER: {:?}", page);
                 self.slots = page.iter();
+                continue;
             }
 
             if let Some(shard) = self.shards.next() {
+                if shard.tid() > Tid::<C>::max_active() {
+                    return None;
+                }
                 self.pages = shard.iter();
                 self.current_shard = shard;
+                self.current_page_sz = 0;
+                self.slots = None;
+            // test_println!("iter: next shard {:?}", shard.tid());
             } else {
+                // test_println!("iter empty");
                 return None;
             }
         }

@@ -15,4 +15,4 @@ RUSTFLAGS="${RUSTFLAGS} --cfg loom_nightly -C debug-assertions=on" \
     LOOM_CHECKPOINT_INTERVAL="${LOOM_CHECKPOINT_INTERVAL:-1}" \
     LOOM_LOG=1 \
     LOOM_LOCATION=1 \
-    cargo +nightly test --release "$@"
+    cargo +nightly test "$@"

@@ -502,7 +502,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let mut pages = current_shard.iter();
         let page = pages.next();
         let current_page_sz = page.map(page::Shared::prev_sz).unwrap_or(0);
-        let slots = pages.next().and_then(page::Shared::iter);
+        let slots = page.and_then(page::Shared::iter);
         iter::Iter {
             shards,
             current_shard,
@@ -665,6 +665,28 @@ impl<C: cfg::Config> Pack<C> for () {
 
     fn from_packed(_from: usize) -> Self {
         unreachable!()
+    }
+}
+
+#[inline(always)]
+pub(crate) fn exponential_backoff(exp: &mut usize) {
+    use crate::sync::{atomic, yield_now};
+
+    /// Maximum exponent we can back off to.
+    const MAX_EXPONENT: usize = 8;
+
+    // Issue 2^exp pause instructions.
+    for _ in 0..(1 << *exp) {
+        atomic::spin_loop_hint();
+    }
+
+    if *exp >= MAX_EXPONENT {
+        // If we have reached the max backoff, also yield to the scheduler
+        // explicitly.
+        yield_now();
+    } else {
+        // Otherwise, increment the exponent.
+        *exp += 1;
     }
 }
 

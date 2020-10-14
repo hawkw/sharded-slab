@@ -468,6 +468,56 @@ fn unique_iter() {
 }
 
 #[test]
+fn invalidate_iter_1() {
+    run_model("invalidate_iter_1", || {
+        let slab = std::sync::Arc::new(Slab::new());
+
+        let idx1 = slab.insert(1).expect("insert");
+        let idx2 = slab.insert(2).expect("insert");
+        let s = slab.clone();
+        let t1 = thread::spawn(move || {
+            test_println!("running");
+            let idx3 = s.insert(3).expect("insert");
+            s.remove(idx1);
+            let idx4 = s.insert(4).expect("insert");
+            s.remove(idx2);
+            s.remove(idx3);
+            s.remove(idx4);
+        });
+
+        // We can't guarantee the iterator to contain any specific
+        // items --- we just want to be sure we are not accessing anything that
+        // is in the process of being added or removed.
+        for i in slab.iter() {
+            test_println!("iter 1 -> {:?}", i);
+        }
+
+        test_println!("DONE ITERATING");
+        t1.join().expect("thread 1 should not panic");
+
+        test_println!("t2 done");
+
+        // // Now that the other thread has joined, make sure it's empty.
+        // let mut is_empty = true;
+        // for i in slab.iter() {
+        //     test_println!("iter 2 -> {:?}", i);
+        //     is_empty = false;
+        // }
+        // assert!(is_empty)
+    });
+}
+
+#[test]
+fn does_it_crash() {
+    loom::model(|| {
+        let an_atomic = loom::sync::atomic::AtomicUsize::new(0);
+        let th = loom::thread::spawn(|| {});
+        an_atomic.load(Ordering::Acquire);
+        th.join().unwrap();
+    });
+}
+
+#[test]
 fn custom_page_sz() {
     let mut model = loom::model::Builder::new();
     model.max_branches = 100000;

@@ -1,6 +1,9 @@
 use crate::cfg::{self, CfgPrivate};
 use crate::clear::Clear;
-use crate::sync::UnsafeCell;
+use crate::sync::{
+    atomic::{AtomicBool, Ordering},
+    UnsafeCell,
+};
 use crate::Pack;
 
 pub(crate) mod slot;
@@ -93,6 +96,7 @@ pub(crate) struct Shared<T, C> {
     size: usize,
     prev_sz: usize,
     slab: UnsafeCell<Option<Slots<T, C>>>,
+    allocating: AtomicBool,
 }
 
 type Slots<T, C> = Box<[Slot<T, C>]>;
@@ -129,6 +133,9 @@ where
     C: cfg::Config,
 {
     const NULL: usize = Addr::<C>::NULL;
+    const ST_UNALLOCATED: usize = 0;
+    const ST_ALLOCATING: usize = 1;
+    const ST_ALLOCATED: usize = 2;
 
     pub(crate) fn new(size: usize, prev_sz: usize) -> Self {
         Self {
@@ -136,6 +143,7 @@ where
             size,
             remote: stack::TransferStack::new(),
             slab: UnsafeCell::new(None),
+            allocating: AtomicBool::new(false),
         }
     }
 
@@ -266,15 +274,16 @@ where
     }
 
     pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+        if self.allocating.load(Ordering::Acquire) {
+            test_println!("-> currently allocating");
+            return None;
+        }
+
         let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
         slab.map(|slab| {
             slab.iter().enumerate().filter_map(
                 (|(idx, slot): (usize, &'a Slot<Option<T>, C>)| {
-                    let (guard, gen) = slot.snapshot(|x| {
-                        x.as_ref().expect(
-                "if a slot can be accessed at the current generation, its value must be `Some`",
-            )
-                    })?;
+                    let (guard, gen) = slot.snapshot(|x| x.as_ref())?;
                     Some((idx, guard, gen))
                 })
                     as fn(
@@ -304,6 +313,9 @@ where
 
         // do we need to allocate storage for this page?
         if self.is_unallocated() {
+            assert!(!self
+                .allocating
+                .compare_and_swap(false, true, Ordering::Release));
             self.allocate();
         }
 
@@ -339,6 +351,9 @@ where
                 *s = Some(slab.into_boxed_slice());
             }
         });
+        assert!(self
+            .allocating
+            .compare_and_swap(true, false, Ordering::Release));
     }
 
     pub(crate) fn mark_clear<F: FreeList<C>>(

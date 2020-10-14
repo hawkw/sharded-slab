@@ -80,6 +80,12 @@ impl<C: cfg::Config> Tid<C> {
     pub fn new(id: usize) -> Self {
         Self::from_usize(id)
     }
+
+    /// Returns the highest thread ID that has been registered.
+    pub(crate) fn max_active() -> Self {
+        let id = REGISTRY.next.load(Ordering::Acquire) - 1;
+        Self::from_usize(id)
+    }
 }
 
 impl<C> Tid<C> {
@@ -119,6 +125,18 @@ impl<C> PartialEq for Tid<C> {
 }
 
 impl<C> Eq for Tid<C> {}
+
+impl<C> PartialOrd for Tid<C> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+impl<C> Ord for Tid<C> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
 
 impl<C: cfg::Config> Clone for Tid<C> {
     fn clone(&self) -> Self {
