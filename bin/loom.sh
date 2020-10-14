@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Runs Loom tests with defaults for Loom's configuration values.
 #
 # The nightly Rust compiler is used to enable Loom's location tracking support.
