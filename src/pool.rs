@@ -1,7 +1,7 @@
 use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
-    page,
+    page, shard,
     tid::Tid,
     Pack, Shard,
 };
@@ -66,7 +66,7 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    shards: Box<[Shard<T, C>]>,
+    shards: shard::Array<T, C>,
     _cfg: PhantomData<C>,
 }
 
@@ -81,9 +81,8 @@ where
     /// Returns a new `Pool` with the provided configuration parameters.
     pub fn new_with_config<C: cfg::Config>() -> Pool<T, C> {
         C::validate();
-        let shards = (0..C::MAX_SHARDS).map(Shard::new).collect();
         Pool {
-            shards,
+            shards: shard::Array::new(),
             _cfg: PhantomData,
         }
     }
@@ -137,10 +136,10 @@ where
     /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// ```
     pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
-        let tid = Tid::<C>::current();
+        let (tid, shard) = self.shards.current();
         let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
-        self.shards[tid.as_usize()]
+        shard
             .init_with(|slot| {
                 let init = init.take().expect("initializer will only be called once");
                 slot.initialize_state(init)

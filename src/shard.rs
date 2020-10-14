@@ -291,7 +291,6 @@ impl<T, C: cfg::Config> Drop for Array<T, C> {
     fn drop(&mut self) {
         // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
         let max = self.max.load(Acquire);
-        test_println!("Array::drop (max={})", max);
         for shard in &self.shards[0..=max] {
             // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
             let ptr = shard.load(Acquire);
@@ -304,7 +303,6 @@ impl<T, C: cfg::Config> Drop for Array<T, C> {
                 // because...we are dropping it...
                 Box::from_raw(ptr)
             };
-            test_println!("-> drop shard={:p}", shard);
             drop(shard)
         }
     }
