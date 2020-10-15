@@ -33,7 +33,7 @@ mod idx {
 }
 
 #[cfg(loom)]
-mod util {
+pub(crate) mod util {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     pub(crate) struct TinyConfig;
 
