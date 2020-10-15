@@ -201,24 +201,19 @@
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.3")]
 
-#[cfg(test)]
-macro_rules! thread_local {
-    ($($tts:tt)+) => { loom::thread_local!{ $($tts)+ } }
-}
-
-#[cfg(not(test))]
-macro_rules! thread_local {
-    ($($tts:tt)+) => { std::thread_local!{ $($tts)+ } }
-}
-
 macro_rules! test_println {
     ($($arg:tt)*) => {
         if cfg!(test) && cfg!(slab_print) {
-            println!("[{:?} {}:{}] {}", crate::Tid::<crate::DefaultConfig>::current(), file!(), line!(), format_args!($($arg)*))
+            if std::thread::panicking() {
+                // getting the thread ID while panicking doesn't seem to play super nicely with loom's
+                // mock lazy_static...
+                println!("[PANIC {:>17}:{:<3}] {}", file!(), line!(), format_args!($($arg)*))
+            } else {
+                println!("[{:?} {:>17}:{:<3}] {}", crate::Tid::<crate::DefaultConfig>::current(), file!(), line!(), format_args!($($arg)*))
+            }
         }
     }
 }
-
 mod clear;
 pub mod implementation;
 mod page;
@@ -654,5 +649,6 @@ impl<C: cfg::Config> Pack<C> for () {
 
 #[cfg(test)]
 pub(crate) use self::tests::util as test_util;
+
 #[cfg(test)]
 mod tests;

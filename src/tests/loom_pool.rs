@@ -1,8 +1,5 @@
-use crate::{
-    clear::Clear,
-    tests::{util::*, TinyConfig},
-    Pack, Pool,
-};
+use super::util::*;
+use crate::{clear::Clear, Pack, Pool};
 use loom::{
     sync::{
         atomic::{AtomicBool, Ordering},

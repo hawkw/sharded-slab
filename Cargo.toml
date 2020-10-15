@@ -25,7 +25,9 @@ harness = false
 lazy_static = "1"
 
 [dev-dependencies]
-loom = { version = "0.3", features = ["checkpoint"] }
 proptest = "0.9.4"
 criterion = "0.3"
 slab = "0.4.2"
+
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.3", features = ["checkpoint"] }

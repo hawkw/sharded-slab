@@ -26,7 +26,7 @@ jobs:
           args: --all-features
 
   test:
-    name: test
+    name: Tests
     runs-on: ubuntu-latest
     needs: check
 
@@ -40,6 +40,23 @@ jobs:
           toolchain: nightly
           override: true
       - name: Run tests
+        run: cargo test
+
+  test-loom:
+    name: Loom tests
+    runs-on: ubuntu-latest
+    needs: check
+
+    steps:
+      - uses: actions/checkout@master
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - name: Run Loom tests
         run: ./bin/loom.sh
 
   clippy_check:
