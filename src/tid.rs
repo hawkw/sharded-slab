@@ -169,7 +169,7 @@ impl Registration {
 // panics. T_T
 // Just skip TID reuse and use loom's lazy_static macro to ensure we have a
 // clean initial TID on every iteration, instead.
-#[cfg(not(test))]
+#[cfg(not(loom))]
 impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(id) = self.0.get() {

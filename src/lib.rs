@@ -647,7 +647,7 @@ impl<C: cfg::Config> Pack<C> for () {
     }
 }
 
-#[cfg(all(loom, test))]
+#[cfg(test)]
 pub(crate) use self::tests::util as test_util;
 
 #[cfg(test)]

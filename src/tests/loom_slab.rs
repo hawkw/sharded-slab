@@ -2,6 +2,8 @@ use super::util::*;
 use crate::Slab;
 use loom::sync::{Arc, Condvar, Mutex};
 use loom::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 #[test]
 fn take_local() {
     run_model("take_local", || {

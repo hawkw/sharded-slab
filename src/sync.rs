@@ -1,6 +1,6 @@
 pub(crate) use self::inner::*;
 
-#[cfg(test)]
+#[cfg(loom)]
 mod inner {
     pub(crate) use loom::cell::UnsafeCell;
     pub(crate) mod atomic {
@@ -13,7 +13,7 @@ mod inner {
     pub(crate) use loom::thread_local;
 }
 
-#[cfg(not(test))]
+#[cfg(not(loom))]
 mod inner {
     pub(crate) use lazy_static::lazy_static;
     pub(crate) use std::sync::atomic;

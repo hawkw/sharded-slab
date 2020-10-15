@@ -1,4 +1,3 @@
-#[cfg(not(loom))]
 mod idx {
     use crate::{
         cfg,
@@ -9,6 +8,7 @@ mod idx {
 
     proptest! {
         #[test]
+        #[cfg_attr(loom, ignore)]
         fn tid_roundtrips(tid in 0usize..Tid::<cfg::DefaultConfig>::BITS) {
             let tid = Tid::<cfg::DefaultConfig>::from_usize(tid);
             let packed = tid.pack(0);
@@ -16,6 +16,7 @@ mod idx {
         }
 
         #[test]
+        #[cfg_attr(loom, ignore)]
         fn idx_roundtrips(
             tid in 0usize..Tid::<cfg::DefaultConfig>::BITS,
             gen in 0usize..slot::Generation::<cfg::DefaultConfig>::BITS,
@@ -32,19 +33,21 @@ mod idx {
     }
 }
 
-#[cfg(loom)]
 pub(crate) mod util {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    #[cfg(loom)]
+    use std::sync::atomic::{AtomicUsize, Ordering};
     pub(crate) struct TinyConfig;
 
     impl crate::Config for TinyConfig {
         const INITIAL_PAGE_SIZE: usize = 4;
     }
 
+    #[cfg(loom)]
     pub(crate) fn run_model(name: &'static str, f: impl Fn() + Sync + Send + 'static) {
         run_builder(name, loom::model::Builder::new(), f)
     }
 
+    #[cfg(loom)]
     pub(crate) fn run_builder(
         name: &'static str,
         builder: loom::model::Builder,
