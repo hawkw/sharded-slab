@@ -710,11 +710,6 @@ impl GetMutError {
     pub fn is_borrowed(&self) -> bool {
         self.kind == GetMutErrorKind::InUse
     }
-        match self.kind {
-            GetMutErrorKind::InUse => true,
-            _ => false,
-        }
-    }
 
     pub fn is_nonexistent(&self) -> bool {
         self.kind == GetMutErrorKind::Nonexistent
