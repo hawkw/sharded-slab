@@ -2,11 +2,18 @@ use crate::{
     cfg::{self, CfgPrivate},
     clear::Clear,
     page,
+    sync::{
+        alloc,
+        atomic::{
+            AtomicPtr, AtomicUsize,
+            Ordering::{self, *},
+        },
+    },
     tid::Tid,
     Pack,
 };
 
-use std::fmt;
+use std::{fmt, ptr, slice};
 
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
@@ -42,6 +49,17 @@ pub(crate) struct Shard<T, C: cfg::Config> {
     /// list, and a pointer to the actual array backing that page.
     shared: Box<[page::Shared<T, C>]>,
 }
+
+pub(crate) struct Array<T, C: cfg::Config> {
+    shards: Box<[Ptr<T, C>]>,
+    max: AtomicUsize,
+}
+
+struct Ptr<T, C: cfg::Config>(AtomicPtr<alloc::Track<Shard<T, C>>>);
+
+pub(crate) struct IterMut<'a, T: 'a, C: cfg::Config + 'a>(slice::IterMut<'a, Ptr<T, C>>);
+
+// === impl Shard ===
 
 impl<T, C> Shard<T, C>
 where
@@ -202,5 +220,166 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Shard<T, C> {
         #[cfg(debug_assertions)]
         d.field("tid", &self.tid);
         d.field("shared", &self.shared).finish()
+    }
+}
+
+// === impl Array ===
+
+impl<T, C> Array<T, C>
+where
+    C: cfg::Config,
+{
+    pub(crate) fn new() -> Self {
+        let mut shards = Vec::with_capacity(C::MAX_SHARDS);
+        for _ in 0..C::MAX_SHARDS {
+            // XXX(eliza): T_T this could be avoided with maybeuninit or something...
+            shards.push(Ptr::null());
+        }
+        Self {
+            shards: shards.into(),
+            max: AtomicUsize::new(0),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get<'a>(&'a self, idx: usize) -> Option<&'a Shard<T, C>> {
+        test_println!("-> get shard={}", idx);
+        self.shards.get(idx)?.load(Acquire)
+    }
+
+    #[inline]
+    pub(crate) fn current<'a>(&'a self) -> (Tid<C>, &'a Shard<T, C>) {
+        let tid = Tid::<C>::current();
+        test_println!("current: {:?}", tid);
+        let idx = tid.as_usize();
+        // It's okay for this to be relaxed. The value is only ever stored by
+        // the thread that corresponds to the index, and we are that thread.
+        let shard = self.shards[idx].load(Relaxed).unwrap_or_else(|| {
+            let ptr = Box::into_raw(Box::new(alloc::Track::new(Shard::new(idx))));
+            test_println!("-> allocated new shard for index {} at {:p}", idx, ptr);
+            self.shards[idx].set(ptr);
+            let mut max = self.max.load(Acquire);
+            while max < idx {
+                match self.max.compare_exchange(max, idx, AcqRel, Acquire) {
+                    Ok(_) => break,
+                    Err(actual) => max = actual,
+                }
+            }
+            test_println!("-> highest index={}, prev={}", std::cmp::max(max, idx), max);
+            unsafe {
+                // Safety: we just put it there!
+                &*ptr
+            }
+            .get_ref()
+        });
+        (tid, shard)
+    }
+
+    pub(crate) fn iter_mut(&mut self) -> IterMut<'_, T, C> {
+        test_println!("Array::iter_mut");
+        let max = self.max.load(Acquire);
+        test_println!("-> highest index={}", max);
+        IterMut(self.shards[0..=max].iter_mut())
+    }
+}
+
+impl<T, C: cfg::Config> Drop for Array<T, C> {
+    fn drop(&mut self) {
+        // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
+        let max = self.max.load(Acquire);
+        for shard in &self.shards[0..=max] {
+            // XXX(eliza): this could be `with_mut` if we wanted to impl a wrapper for std atomics to change `get_mut` to `with_mut`...
+            let ptr = shard.0.load(Acquire);
+            if ptr.is_null() {
+                continue;
+            }
+            let shard = unsafe {
+                // Safety: this is the only place where these boxes are
+                // deallocated, and we have exclusive access to the shard array,
+                // because...we are dropping it...
+                Box::from_raw(ptr)
+            };
+            drop(shard)
+        }
+    }
+}
+
+impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Array<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let max = self.max.load(Acquire);
+        let mut set = f.debug_map();
+        for shard in &self.shards[0..=max] {
+            let ptr = shard.0.load(Acquire);
+            if let Some(shard) = ptr::NonNull::new(ptr) {
+                set.entry(&format_args!("{:p}", ptr), unsafe { shard.as_ref() });
+            } else {
+                set.entry(&format_args!("{:p}", ptr), &());
+            }
+        }
+        set.finish()
+    }
+}
+
+// === impl Ptr ===
+
+impl<T, C: cfg::Config> Ptr<T, C> {
+    #[inline]
+    fn null() -> Self {
+        Self(AtomicPtr::new(ptr::null_mut()))
+    }
+
+    #[inline]
+    fn load(&self, order: Ordering) -> Option<&Shard<T, C>> {
+        let ptr = self.0.load(order);
+        test_println!("---> loaded={:p} (order={:?})", ptr, order);
+        if ptr.is_null() {
+            test_println!("---> null");
+            return None;
+        }
+        let track = unsafe {
+            // Safety: The returned reference will have the same lifetime as the
+            // reference to the shard pointer, which (morally, if not actually)
+            // owns the shard. The shard is only deallocated when the shard
+            // array is dropped, and it won't be dropped while this pointer is
+            // borrowed --- and the returned reference has the same lifetime.
+            //
+            // We know that the pointer is not null, because we just
+            // null-checked it immediately prior.
+            &*ptr
+        };
+
+        Some(track.get_ref())
+    }
+
+    #[inline]
+    fn set(&self, new: *mut alloc::Track<Shard<T, C>>) {
+        self.0
+            .compare_exchange(ptr::null_mut(), new, AcqRel, Acquire)
+            .expect("a shard can only be inserted by the thread that owns it, this is a bug!");
+    }
+}
+
+// === Iterators ===
+
+impl<'a, T, C> Iterator for IterMut<'a, T, C>
+where
+    T: 'a,
+    C: cfg::Config + 'a,
+{
+    type Item = &'a Shard<T, C>;
+    fn next(&mut self) -> Option<Self::Item> {
+        test_println!("IterMut::next");
+        loop {
+            // Skip over empty indices if they are less than the highest
+            // allocated shard. Some threads may have accessed the slab
+            // (generating a thread ID) but never actually inserted data, so
+            // they may have never allocated a shard.
+            let next = self.0.next();
+            test_println!("-> next.is_some={}", next.is_some());
+            if let Some(shard) = next?.load(Acquire) {
+                test_println!("-> done");
+                return Some(shard);
+            }
+        }
     }
 }

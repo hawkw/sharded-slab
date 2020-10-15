@@ -236,7 +236,7 @@ use std::{fmt, marker::PhantomData};
 ///
 /// See the [crate-level documentation](index.html) for details on using this type.
 pub struct Slab<T, C: cfg::Config = DefaultConfig> {
-    shards: Box<[Shard<Option<T>, C>]>,
+    shards: shard::Array<Option<T>, C>,
     _cfg: PhantomData<C>,
 }
 
@@ -260,9 +260,8 @@ impl<T> Slab<T> {
     /// Returns a new slab with the provided configuration parameters.
     pub fn new_with_config<C: cfg::Config>() -> Slab<T, C> {
         C::validate();
-        let shards = (0..C::MAX_SHARDS).map(Shard::new).collect();
         Slab {
-            shards,
+            shards: shard::Array::new(),
             _cfg: PhantomData,
         }
     }
@@ -300,10 +299,10 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// assert_eq!(slab.get(key).unwrap(), "hello world");
     /// ```
     pub fn insert(&self, value: T) -> Option<usize> {
-        let tid = Tid::<C>::current();
+        let (tid, shard) = self.shards.current();
         test_println!("insert {:?}", tid);
         let mut value = Some(value);
-        self.shards[tid.as_usize()]
+        shard
             .init_with(|slot| slot.insert(&mut value))
             .map(|idx| tid.pack(idx))
     }
@@ -424,7 +423,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
         let tid = C::unpack_tid(idx);
 
         test_println!("rm {:?}", tid);
-        let shard = &self.shards[tid.as_usize()];
+        let shard = self.shards.get(tid.as_usize())?;
         if tid.is_current() {
             shard.take_local(idx)
         } else {
