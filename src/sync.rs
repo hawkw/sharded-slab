@@ -9,8 +9,6 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::lazy_static;
-    pub(crate) use loom::sync::Mutex;
     pub(crate) use loom::thread::yield_now;
     pub(crate) use loom::thread_local;
 }
