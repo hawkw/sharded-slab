@@ -647,7 +647,7 @@ impl<C: cfg::Config> Pack<C> for () {
     }
 }
 
-#[cfg(test)]
+#[cfg(loom)]
 pub(crate) use self::tests::util as test_util;
 #[cfg(test)]
 mod tests;

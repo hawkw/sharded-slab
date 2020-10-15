@@ -10,7 +10,7 @@
 #
 # Any arguments to this script are passed to the `cargo test` invocation.
 
-RUSTFLAGS="${RUSTFLAGS} --cfg loom_nightly -C debug-assertions=on" \
+RUSTFLAGS="${RUSTFLAGS} --cfg loom loom_nightly -C debug-assertions=on" \
     LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" \
     LOOM_CHECKPOINT_INTERVAL="${LOOM_CHECKPOINT_INTERVAL:-1}" \
     LOOM_LOG=1 \

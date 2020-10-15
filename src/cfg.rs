@@ -161,7 +161,7 @@ impl<C: Config> fmt::Debug for DebugConfig<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_util::*, Slab};
+    use crate::Slab;
 
     #[test]
     #[should_panic]
@@ -177,8 +177,6 @@ mod tests {
             const MAX_PAGES: usize = 1;
         }
 
-        run_model("validates_max_refs", || {
-            let _slab = Slab::<usize>::new_with_config::<GiantGenConfig>();
-        })
+        let _slab = Slab::<usize>::new_with_config::<GiantGenConfig>();
     }
 }

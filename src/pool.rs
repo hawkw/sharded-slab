@@ -320,6 +320,3 @@ where
         *self.inner.item() == *other
     }
 }
-
-#[cfg(test)]
-mod tests;
