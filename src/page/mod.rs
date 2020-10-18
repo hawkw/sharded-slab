@@ -261,15 +261,11 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    /// Allocate and initialize a new slot.
-    ///
-    /// It does this via the provided initializatin function `func`. Once it get's the generation
-    /// number for the new slot, it performs the operations required to return the key to the
-    /// caller.]
-    pub(crate) fn init_with<F>(&self, local: &Local, func: F) -> Option<usize>
-    where
-        F: FnOnce(&Slot<T, C>) -> Option<slot::Generation<C>>,
-    {
+    pub(crate) fn init_with<'a, U>(
+        &'a self,
+        local: &Local,
+        init: impl FnOnce(usize, &'a Slot<T, C>) -> Option<U>,
+    ) -> Option<U> {
         let head = self.pop(local)?;
 
         // do we need to allocate storage for this page?
@@ -277,19 +273,20 @@ where
             self.allocate();
         }
 
-        let gen = self.slab.with(|slab| {
+        let index = head + self.prev_sz;
+
+        let result = self.slab.with(|slab| {
             let slab = unsafe { &*(slab) }
                 .as_ref()
                 .expect("page must have been allocated to insert!");
             let slot = &slab[head];
+            let result = init(index, slot)?;
             local.set_head(slot.next());
-            func(slot)
+            Some(result)
         })?;
 
-        let index = head + self.prev_sz;
-
-        test_println!("-> initialize_new_slot: insert at offset: {}", index);
-        Some(gen.pack(index))
+        test_println!("-> init_with: insert at offset: {}", index);
+        Some(result)
     }
 
     /// Allocates storage for the page's slots.

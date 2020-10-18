@@ -73,7 +73,9 @@ fn dont_drop() {
         let pool: Pool<DontDropMe> = Pool::new();
         let (item1, value) = DontDropMe::new(1);
         test_println!("-> dont_drop: Inserting into pool {}", item1.id);
-        let idx = pool.create(move |item| *item = value).expect("Create");
+        let idx = pool
+            .create_with(move |item| *item = value)
+            .expect("create_with");
 
         item1.assert_not_clear();
 
@@ -85,13 +87,15 @@ fn dont_drop() {
 }
 
 #[test]
-fn concurrent_create_clear() {
-    run_model("concurrent_create_clear", || {
+fn concurrent_create_with_clear() {
+    run_model("concurrent_create_with_clear", || {
         let pool: Arc<Pool<DontDropMe>> = Arc::new(Pool::new());
         let pair = Arc::new((Mutex::new(None), Condvar::new()));
 
         let (item1, value) = DontDropMe::new(1);
-        let idx1 = pool.create(move |item| *item = value).expect("Create");
+        let idx1 = pool
+            .create_with(move |item| *item = value)
+            .expect("create_with");
         let p = pool.clone();
         let pair2 = pair.clone();
         let test_value = item1.clone();
@@ -130,7 +134,9 @@ fn racy_clear() {
         let pool = Arc::new(Pool::new());
         let (item, value) = DontDropMe::new(1);
 
-        let idx = pool.create(move |item| *item = value).expect("Create");
+        let idx = pool
+            .create_with(move |item| *item = value)
+            .expect("create_with");
         assert_eq!(pool.get(idx).unwrap().0.id, item.id);
 
         let p = pool.clone();
@@ -156,12 +162,16 @@ fn clear_local_and_reuse() {
         let pool = Arc::new(Pool::new_with_config::<TinyConfig>());
 
         let idx1 = pool
-            .create(|item: &mut String| {
+            .create_with(|item: &mut String| {
                 item.push_str("hello world");
             })
-            .expect("create");
-        let idx2 = pool.create(|item| item.push_str("foo")).expect("create");
-        let idx3 = pool.create(|item| item.push_str("bar")).expect("create");
+            .expect("create_with");
+        let idx2 = pool
+            .create_with(|item| item.push_str("foo"))
+            .expect("create_with");
+        let idx3 = pool
+            .create_with(|item| item.push_str("bar"))
+            .expect("create_with");
 
         assert_eq!(pool.get(idx1).unwrap(), String::from("hello world"));
         assert_eq!(pool.get(idx2).unwrap(), String::from("foo"));
@@ -170,7 +180,9 @@ fn clear_local_and_reuse() {
         let first = idx1 & (!crate::page::slot::Generation::<TinyConfig>::MASK);
         assert!(pool.clear(idx1));
 
-        let idx1 = pool.create(move |item| item.push_str("h")).expect("create");
+        let idx1 = pool
+            .create_with(move |item| item.push_str("h"))
+            .expect("create_with");
 
         let second = idx1 & (!crate::page::slot::Generation::<TinyConfig>::MASK);
         assert_eq!(first, second);
@@ -184,10 +196,10 @@ fn get_mut_basic() {
         let pool = Arc::new(Pool::new());
 
         let idx1 = pool
-            .create(|item: &mut String| {
+            .create_with(|item: &mut String| {
                 item.push_str("hello world");
             })
-            .expect("create");
+            .expect("create_with");
         let pool2 = pool.clone();
         let t1 = thread::spawn(move || {
             let v = pool2.get(idx1);
@@ -215,10 +227,10 @@ fn get_mut_contended() {
         let pool = Arc::new(Pool::new());
 
         let idx1 = pool
-            .create(|item: &mut String| {
+            .create_with(|item: &mut String| {
                 item.push_str("hello world");
             })
-            .expect("create");
+            .expect("create_with");
         let pool2 = pool.clone();
         let t1 = thread::spawn(move || {
             let v = pool2.get_mut(idx1);

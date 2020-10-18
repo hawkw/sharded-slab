@@ -1,7 +1,8 @@
 use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
-    page, shard,
+    page::{self, slot},
+    shard,
     tid::Tid,
     Pack, Shard,
 };
@@ -98,7 +99,7 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    inner: page::slot::Guard<'a, &'a T, C>,
+    inner: page::slot::Guard<'a, T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
@@ -115,7 +116,7 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    inner: page::slot::Guard<'a, &'a mut T, C>,
+    inner: page::slot::GuardMut<'a, T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
@@ -149,19 +150,44 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create(|item| item.push_str("Hello")).unwrap();
-    /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    ///
+    /// // Create a new pooled item, returning a guard that allows mutable
+    /// // access to the new item.
+    /// let item = pool.create().unwrap();
+    /// // Return a key that allows indexing the created item once the guard
+    /// // has been dropped.
+    /// let key = item.key();
+    ///
+    /// // Mutate the item.
+    /// item.push_str("Hello");
+    /// // Drop the guard, releasing mutable access to the new item.
+    /// drop(guard);
+    ///
+    /// /// Other threads may now (immutably) access the item using the returned key.
+    /// thread::spawn(move || {
+    ///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    /// }).join().unwrap();
     /// ```
-    pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
+    pub fn create(&self) -> Option<PoolGuardMut<'_, T, C>> {
         let (tid, shard) = self.shards.current();
-        let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
-        shard
-            .init_with(|slot| {
-                let init = init.take().expect("initializer will only be called once");
-                slot.initialize_state(init)
-            })
-            .map(|idx| tid.pack(idx))
+        let (key, inner) = shard.init_with(|idx, slot| {
+            let gen = slot.initialize_state(|_| {}, slot::RefCount::EXCLUSIVE)?;
+            let guard = unsafe { slot.guard_mut() };
+            Some((gen.pack(idx), guard))
+        })?;
+        Some(PoolGuardMut {
+            inner,
+            key: tid.pack(key),
+            shard,
+        })
+    }
+
+    pub fn create_with(&self, init: impl FnOnce(&mut T)) -> Option<usize> {
+        test_println!("pool: create_with");
+        let mut guard = self.create()?;
+        init(&mut guard);
+        Some(guard.key())
     }
 
     /// Return a reference to the value associated with the given key.
@@ -183,7 +209,7 @@ where
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key), |x| x))?;
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
         Some(PoolGuard { inner, shard, key })
     }
 
@@ -217,7 +243,7 @@ where
             .get(tid.as_usize())
             .ok_or(crate::GetMutError::NONEXISTENT)?;
         let inner = shard
-            .with_slot(key, |slot| Some(slot.get_mut(C::unpack_gen(key), |x| x)))
+            .with_slot(key, |slot| Some(slot.get_mut(C::unpack_gen(key))))
             .ok_or(crate::GetMutError::NONEXISTENT)??;
 
         Ok(PoolGuardMut { inner, shard, key })
@@ -319,6 +345,11 @@ where
     pub fn key(&self) -> usize {
         self.key
     }
+
+    #[inline]
+    fn value(&self) -> &T {
+        self.inner.value()
+    }
 }
 
 impl<'a, T, C> std::ops::Deref for PoolGuard<'a, T, C>
@@ -329,7 +360,7 @@ where
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        self.value()
     }
 }
 
@@ -358,7 +389,7 @@ where
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        fmt::Debug::fmt(self.value(), f)
     }
 }
 
@@ -368,7 +399,7 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        *self.inner.item() == *other
+        *self.value() == *other
     }
 }
 
@@ -383,6 +414,11 @@ where
     pub fn key(&self) -> usize {
         self.key
     }
+
+    #[inline]
+    fn value(&self) -> &T {
+        self.inner.value()
+    }
 }
 
 impl<'a, T, C: cfg::Config> std::ops::Deref for PoolGuardMut<'a, T, C>
@@ -393,7 +429,7 @@ where
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        self.value()
     }
 }
 
@@ -403,7 +439,7 @@ where
     C: cfg::Config,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.item_mut()
+        unsafe { self.inner.value_mut() }
     }
 }
 
@@ -431,7 +467,7 @@ where
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        fmt::Debug::fmt(self.value(), f)
     }
 }
 
@@ -441,6 +477,6 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().eq(other)
+        self.value().eq(other)
     }
 }

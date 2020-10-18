@@ -217,7 +217,7 @@ macro_rules! test_println {
 mod clear;
 pub mod implementation;
 mod page;
-// mod pool;
+mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -227,8 +227,8 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
+pub use pool::{Pool, PoolGuard, PoolGuardMut};
 use std::ptr;
-// pub use pool::{Pool, PoolGuard, PoolGuardMut};
 
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
@@ -330,7 +330,10 @@ impl<T, C: cfg::Config> Slab<T, C> {
         test_println!("insert {:?}", tid);
         let mut value = Some(value);
         shard
-            .init_with(|slot| slot.insert(&mut value))
+            .init_with(|idx, slot| {
+                let gen = slot.insert(&mut value)?;
+                Some(gen.pack(idx))
+            })
             .map(|idx| tid.pack(idx))
     }
 
@@ -487,7 +490,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
             key,
         })
     }
-
+    /*
     /// Return a mutable reference to the value associated with the given key.
     ///
     /// If the value is already in use, this method will return `GetMutError::INUSE`. If the key
@@ -508,6 +511,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     ///
     /// assert_eq!(slab.get(key).unwrap(), "Mutable access!");
     /// ```
+     */
     pub fn get_mut(&self, key: usize) -> Result<GuardMut<'_, T, C>, GetMutError> {
         // let tid = C::unpack_tid(key);
 
