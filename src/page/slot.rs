@@ -46,7 +46,7 @@ struct LifecycleGen<C>(Generation<C>);
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(usize)]
 enum State {
-    NotRemoved = 0b00,
+    Present = 0b00,
     Marked = 0b01,
     Removing = 0b11,
 }
@@ -126,7 +126,7 @@ where
             // current, and the slot must not be in the process of being
             // removed. If we can no longer access the slot at the given
             // generation, return `None`.
-            if gen != current_gen || state != Lifecycle::NOT_REMOVED {
+            if gen != current_gen || state != Lifecycle::PRESENT {
                 test_println!("-> get_mut: no longer exists!");
                 return Err(crate::GetMutError::NONEXISTENT);
             }
@@ -191,7 +191,7 @@ where
             // current, and the slot must not be in the process of being
             // removed. If we can no longer access the slot at the given
             // generation, return `None`.
-            if gen != current_gen || state != Lifecycle::NOT_REMOVED {
+            if gen != current_gen || state != Lifecycle::PRESENT {
                 test_println!("-> get: no longer exists!");
                 return None;
             }
@@ -359,7 +359,7 @@ where
     /// Initialize a slot
     ///
     /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
-    /// only need to ensure that the `Slot` is in the right state, while when being used in a
+    /// only need to ensure that the `Slot` is in the right `state, while when being used in a
     /// `Slab` we want to insert a value into it, as the memory is not initialized
     pub(crate) fn initialize_state(
         &self,
@@ -384,7 +384,7 @@ where
             return None;
         }
 
-        let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(new_refs.pack(0)));
+        let new_lifecycle = gen.pack(Lifecycle::<C>::PRESENT.pack(new_refs.pack(0)));
         let was_set = self.lifecycle.compare_exchange(
             lifecycle,
             new_lifecycle,
@@ -678,8 +678,8 @@ impl<C: cfg::Config> Lifecycle<C> {
         _cfg: PhantomData,
     };
 
-    const NOT_REMOVED: Self = Self {
-        state: State::NotRemoved,
+    const PRESENT: Self = Self {
+        state: State::Present,
         _cfg: PhantomData,
     };
 }
@@ -691,7 +691,7 @@ impl<C: cfg::Config> Pack<C> for Lifecycle<C> {
     fn from_usize(u: usize) -> Self {
         Self {
             state: match u & Self::MASK {
-                0b00 => State::NotRemoved,
+                0b00 => State::Present,
                 0b01 => State::Marked,
                 0b11 => State::Removing,
                 bad => unreachable!("weird lifecycle {:#b}", bad),
