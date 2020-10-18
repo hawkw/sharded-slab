@@ -50,6 +50,7 @@ fn take_local() {
 }
 
 #[test]
+#[ignore]
 fn get_mut_local() {
     run_model("get_mut_local", || {
         let slab = Arc::new(Slab::new());
@@ -321,7 +322,7 @@ fn concurrent_remove_remote_and_reuse() {
 }
 
 struct SetDropped {
-    value: usize,
+    val: usize,
     dropped: std::sync::Arc<AtomicBool>,
 }
 
@@ -330,10 +331,10 @@ struct AssertDropped {
 }
 
 impl AssertDropped {
-    fn new(value: usize) -> (Self, SetDropped) {
+    fn new(val: usize) -> (Self, SetDropped) {
         let dropped = std::sync::Arc::new(AtomicBool::new(false));
         let val = SetDropped {
-            value,
+            val,
             dropped: dropped.clone(),
         };
         (Self { dropped }, val)
@@ -414,7 +415,7 @@ fn remove_remote_during_insert() {
 
         let t1 = thread::spawn(move || {
             let g = slab2.get(idx);
-            assert_ne!(g.as_ref().map(|v| v.value), Some(2));
+            assert_ne!(g.as_ref().map(|v| v.val), Some(2));
             drop(g);
         });
 
@@ -607,6 +608,7 @@ mod free_list_reuse {
 }
 
 #[test]
+#[ignore]
 fn get_mut_basic() {
     run_model("get_mut_basic", || {
         let slab = Arc::new(Slab::new());
@@ -634,6 +636,7 @@ fn get_mut_basic() {
 }
 
 #[test]
+#[ignore]
 fn get_mut_contended() {
     run_model("get_mut_contended", || {
         let slab = Arc::new(Slab::new());
