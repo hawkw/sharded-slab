@@ -261,10 +261,10 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn init_with<'a, U>(
-        &'a self,
+    pub(crate) fn init_with<U>(
+        &self,
         local: &Local,
-        init: impl FnOnce(usize, &'a Slot<T, C>) -> Option<U>,
+        init: impl FnOnce(usize, &Slot<T, C>) -> Option<U>,
     ) -> Option<U> {
         let head = self.pop(local)?;
 

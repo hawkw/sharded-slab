@@ -161,9 +161,9 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn init_with<'a, U>(
-        &'a self,
-        mut init: impl FnMut(usize, &'a page::Slot<T, C>) -> Option<U>,
+    pub(crate) fn init_with<U>(
+        &self,
+        mut init: impl FnMut(usize, &page::Slot<T, C>) -> Option<U>,
     ) -> Option<U> {
         // Can we fit the value into an exist`ing page?
         for (page_idx, page) in self.shared.iter().enumerate() {

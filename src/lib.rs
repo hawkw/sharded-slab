@@ -254,31 +254,6 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
-/// A guard that allows exclusive mutable access to an object in a slab.
-///
-/// While the guard exists, it indicates to the slab that the item the guard
-/// references is currently being accessed. If the item is removed from the slab
-/// while a guard exists, the removal will be deferred until the guard is
-/// dropped. The slot cannot be accessed by other threads while it is accessed
-/// mutably.
-pub struct GuardMut<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, &'a mut T, C>,
-    shard: &'a Shard<Option<T>, C>,
-    key: usize,
-}
-
-/// An error indicating that a slot could not be borrowed mutably.
-#[derive(Debug)]
-pub struct GetMutError {
-    kind: GetMutErrorKind,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum GetMutErrorKind {
-    Nonexistent,
-    InUse,
-}
-
 impl<T> Slab<T> {
     /// Returns a new slab with the default configuration parameters.
     pub fn new() -> Self {
@@ -491,49 +466,6 @@ impl<T, C: cfg::Config> Slab<T, C> {
             key,
         })
     }
-    /*
-    /// Return a mutable reference to the value associated with the given key.
-    ///
-    /// If the value is already in use, this method will return `GetMutError::INUSE`. If the key
-    /// points to a non existant value, it will return `GetMutError::NONEXISTENT`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let slab = sharded_slab::Slab::new();
-    /// let key = slab.insert("Hello world").unwrap();
-    ///
-    /// {
-    /// let mut value = slab.get_mut(key).unwrap();
-    /// assert_eq!(value, "Hello world");
-    ///
-    /// *value = "Mutable access!";
-    /// }
-    ///
-    /// assert_eq!(slab.get(key).unwrap(), "Mutable access!");
-    /// ```
-     */
-    pub fn get_mut(&self, key: usize) -> Result<GuardMut<'_, T, C>, GetMutError> {
-        // let tid = C::unpack_tid(key);
-
-        // test_println!("get_mut {:?}; current={:?}", tid, Tid::<C>::current());
-        // let shard = self
-        //     .shards
-        //     .get(tid.as_usize())
-        //     .ok_or(GetMutError::NONEXISTENT)?;
-        // let inner = shard
-        //     .with_slot(key, |slot| {
-        //         Some(slot.get_mut(C::unpack_gen(key), |x| {
-        //             x.as_mut().expect(
-        //             "if a slot can be accessed at the current generation, its value must be `Some`",
-        //         )
-        //         }))
-        //     })
-        //     .ok_or(GetMutError::NONEXISTENT)??;
-
-        // Ok(GuardMut { inner, shard, key })
-        todo!()
-    }
 
     /// Returns `true` if the slab contains a value for the given key.
     ///
@@ -642,97 +574,6 @@ where
 {
     fn eq(&self, other: &T) -> bool {
         self.value().eq(other)
-    }
-}
-
-// === impl GuardMut ===
-
-impl<'a, T, C: cfg::Config> GuardMut<'a, T, C> {
-    /// Returns the key used to access the guard.
-    pub fn key(&self) -> usize {
-        self.key
-    }
-}
-
-impl<'a, T, C: cfg::Config> std::ops::Deref for GuardMut<'a, T, C> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        // self.inner.item()
-        todo!()
-    }
-}
-
-impl<'a, T, C: cfg::Config> std::ops::DerefMut for GuardMut<'a, T, C> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        // self.inner.item_mut()
-        todo!()
-    }
-}
-
-impl<'a, T, C: cfg::Config> Drop for GuardMut<'a, T, C> {
-    fn drop(&mut self) {
-        use crate::sync::atomic;
-        if self.inner.release() {
-            atomic::fence(atomic::Ordering::Acquire);
-            if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.remove_local(self.key);
-            } else {
-                self.shard.remove_remote(self.key);
-            }
-        }
-    }
-}
-
-impl<'a, T, C> fmt::Debug for GuardMut<'a, T, C>
-where
-    T: fmt::Debug,
-    C: cfg::Config,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // fmt::Debug::fmt(self.inner.item(), f)
-        todo!()
-    }
-}
-
-impl<'a, T, C> PartialEq<T> for GuardMut<'a, T, C>
-where
-    T: PartialEq<T>,
-    C: cfg::Config,
-{
-    fn eq(&self, other: &T) -> bool {
-        // self.inner.item().eq(other)
-        todo!()
-    }
-}
-
-// === impl GetMutError ===
-
-impl fmt::Display for GetMutError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
-            GetMutErrorKind::InUse => f.pad("entry is already borrowed"),
-            GetMutErrorKind::Nonexistent => f.pad("no entry exists for the provided index"),
-        }
-    }
-}
-
-impl std::error::Error for GetMutError {}
-
-impl GetMutError {
-    pub(crate) const BORROWED: Self = Self {
-        kind: GetMutErrorKind::InUse,
-    };
-    pub(crate) const NONEXISTENT: Self = Self {
-        kind: GetMutErrorKind::Nonexistent,
-    };
-
-    pub fn is_borrowed(&self) -> bool {
-        self.kind == GetMutErrorKind::InUse
-    }
-
-    pub fn is_nonexistent(&self) -> bool {
-        self.kind == GetMutErrorKind::Nonexistent
     }
 }
 

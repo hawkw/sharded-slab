@@ -4,7 +4,7 @@ use crate::sync::{
     UnsafeCell,
 };
 use crate::{cfg, clear::Clear, Pack, Tid};
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, mem, ptr};
 
 pub(crate) struct Slot<T, C> {
     lifecycle: AtomicUsize,
@@ -23,6 +23,12 @@ pub(crate) struct Guard<'a, T, C: cfg::Config = cfg::DefaultConfig> {
 #[derive(Debug)]
 pub(crate) struct GuardMut<'a, T, C: cfg::Config = cfg::DefaultConfig> {
     slot: &'a Slot<T, C>,
+}
+
+#[derive(Debug)]
+pub(crate) struct InitGuard<T, C: cfg::Config = cfg::DefaultConfig> {
+    slot: ptr::NonNull<Slot<T, C>>,
+    curr_lifecycle: usize,
 }
 
 #[repr(transparent)]
@@ -99,70 +105,6 @@ where
         self.next.with_mut(|n| unsafe {
             (*n) = next;
         })
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_mut(
-        &self,
-        gen: Generation<C>,
-    ) -> Result<GuardMut<'_, T, C>, crate::GetMutError> {
-        let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
-        loop {
-            // Unpack the current state.
-            let state = Lifecycle::<C>::from_packed(lifecycle);
-            let current_gen = LifecycleGen::<C>::from_packed(lifecycle).0;
-            let refs = RefCount::<C>::from_packed(lifecycle);
-
-            test_println!(
-                "-> get_mut {:?}; current_gen={:?}; lifecycle={:#x}; state={:?}; refs={:?};",
-                gen,
-                current_gen,
-                lifecycle,
-                state,
-                refs,
-            );
-
-            // Is it okay to access this slot? The accessed generation must be
-            // current, and the slot must not be in the process of being
-            // removed. If we can no longer access the slot at the given
-            // generation, return `None`.
-            if gen != current_gen || state != Lifecycle::PRESENT {
-                test_println!("-> get_mut: no longer exists!");
-                return Err(crate::GetMutError::NONEXISTENT);
-            }
-
-            // Mark the slot for exclusive access.
-            let new_refs = refs.make_exclusive()?;
-            match self.lifecycle.compare_exchange(
-                lifecycle,
-                new_refs.pack(current_gen.pack(state.pack(0))),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    // // Okay, the ref count was incremented successfully! We can
-                    // // now return a guard!
-                    // let item = self.item.with_mut(|value| unsafe {
-                    //     // Safety: the value will not be accessed while marked
-                    //     // exclusively.
-                    //     f(&mut *value)
-                    // });
-
-                    test_println!("-> {:?}", new_refs);
-                    return Ok(GuardMut { slot: self });
-                }
-                Err(actual) => {
-                    // Another thread modified the slot's state before us! We
-                    // need to retry with the new state.
-                    //
-                    // Since the new state may mean that the accessed generation
-                    // is no longer valid, we'll check again on the next
-                    // iteration of the loop.
-                    test_println!("-> get_mut: retrying; lifecycle={:#x};", actual);
-                    lifecycle = actual;
-                }
-            };
-        }
     }
 
     #[inline(always)]
@@ -361,22 +303,17 @@ where
     /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
     /// only need to ensure that the `Slot` is in the right `state, while when being used in a
     /// `Slab` we want to insert a value into it, as the memory is not initialized
-    pub(crate) fn initialize_state(
-        &self,
-        f: impl FnOnce(&mut T),
-        new_refs: RefCount<C>,
-    ) -> Option<Generation<C>> {
+    pub(crate) fn init(&self) -> Option<InitGuard<T, C>> {
         // Load the current lifecycle state.
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
-        let gen = LifecycleGen::from_packed(lifecycle).0;
+        let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
         let refs = RefCount::<C>::from_packed(lifecycle);
 
         test_println!(
-            "-> initialize_state; state={:?}; gen={:?}; refs={:?}; new_refs={:?};",
+            "-> initialize_state; state={:?}; gen={:?}; refs={:?};",
             Lifecycle::<C>::from_packed(lifecycle),
             gen,
             refs,
-            new_refs,
         );
 
         if refs.value != 0 {
@@ -384,35 +321,10 @@ where
             return None;
         }
 
-        let new_lifecycle = gen.pack(Lifecycle::<C>::PRESENT.pack(new_refs.pack(0)));
-        let was_set = self.lifecycle.compare_exchange(
-            lifecycle,
-            new_lifecycle,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
-        if let Err(_actual) = was_set {
-            // The slot was modified while we were inserting to it! It's no
-            // longer safe to insert a new value.
-            test_println!(
-                "-> modified during insert, cancelling! new={:#x}; expected={:#x}; actual={:#x};",
-                new_lifecycle,
-                lifecycle,
-                _actual
-            );
-            return None;
-        }
-
-        // call provided function to update this slot
-        self.item.with_mut(|item| unsafe {
-            f(&mut *item);
-        });
-
-        Some(gen)
-    }
-
-    pub(crate) unsafe fn guard_mut(&self) -> GuardMut<'_, T, C> {
-        GuardMut { slot: self }
+        Some(InitGuard {
+            slot: ptr::NonNull::from(self),
+            curr_lifecycle: lifecycle,
+        })
     }
 }
 
@@ -433,12 +345,15 @@ where
         debug_assert!(self.is_empty(), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
 
-        let gen = self.initialize_state(
-            |item| {
-                *item = value.take();
-            },
-            RefCount::NONE,
-        )?;
+        let mut guard = self.init()?;
+        let gen = guard.generation();
+        unsafe {
+            // Safety: Accessing the value of an `InitGuard` is unsafe because
+            // it has a pointer to a slot which may dangle. Here, we know the
+            // pointed slot is alive because we have a reference to it in scope,
+            // and the `InitGuard` will be dropped when this function returns.
+            mem::swap(guard.value_mut(), value);
+        };
         test_println!("-> inserted at {:?}", gen);
 
         Some(gen)
@@ -648,22 +563,6 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> GuardMut<'a, T, C> {
-    pub(crate) fn release(&self) -> bool {
-        self.slot.release()
-    }
-
-    #[inline(always)]
-    pub(crate) fn value(&self) -> &T {
-        self.slot.item.with(|item| unsafe { &*item })
-    }
-
-    #[inline(always)]
-    pub(crate) fn value_mut(&self) -> &mut T {
-        self.slot.item.with_mut(|item| unsafe { &mut *item })
-    }
-}
-
 // impl<'a, T, C: cfg::Config> Guard<'a, &'a mut T, C> {
 //     pub(crate) fn item_mut(&mut self) -> &mut T {
 //         self.item
@@ -741,40 +640,10 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 impl<C: cfg::Config> RefCount<C> {
     pub(crate) const MAX: usize = Self::BITS - 1;
 
-    pub(crate) const EXCLUSIVE: Self = Self {
-        value: Self::BITS,
-        _cfg: PhantomData,
-    };
-
-    const NONE: Self = Self {
-        value: 0,
-        _cfg: PhantomData,
-    };
-
-    #[inline]
-    fn is_exclusive(self) -> bool {
-        self == Self::EXCLUSIVE
-    }
-
-    fn make_exclusive(self) -> Result<Self, crate::GetMutError> {
-        if self.value == 0 {
-            return Ok(Self::EXCLUSIVE);
-        }
-        Err(crate::GetMutError::BORROWED)
-    }
-
     #[inline]
     fn incr(self) -> Option<Self> {
         if self.value >= Self::MAX {
-            test_println!(
-                "-> get: {}; MAX={}",
-                if self.is_exclusive() {
-                    "slot is locked exclusively"
-                } else {
-                    "max concurrent references reached"
-                },
-                RefCount::<C>::MAX
-            );
+            test_println!("-> get: {}; MAX={}", self.value, RefCount::<C>::MAX);
             return None;
         }
 
@@ -783,9 +652,6 @@ impl<C: cfg::Config> RefCount<C> {
 
     #[inline]
     fn decr(self) -> Self {
-        if self.is_exclusive() {
-            return Self::from_usize(0);
-        }
         Self::from_usize(self.value - 1)
     }
 }
@@ -836,6 +702,40 @@ impl<C: cfg::Config> Pack<C> for LifecycleGen<C> {
 
     fn as_usize(&self) -> usize {
         self.0.as_usize()
+    }
+}
+
+impl<T, C: cfg::Config> InitGuard<T, C> {
+    pub(crate) fn generation(&self) -> Generation<C> {
+        LifecycleGen::<C>::from_packed(self.curr_lifecycle).0
+    }
+
+    pub(crate) unsafe fn value(&self) -> &T {
+        self.slot.as_ref().item.with(|val| &*val)
+    }
+
+    pub(crate) unsafe fn value_mut(&mut self) -> &mut T {
+        self.slot.as_ref().item.with_mut(|val| &mut *val)
+    }
+}
+
+impl<T, C: cfg::Config> Drop for InitGuard<T, C> {
+    fn drop(&mut self) {
+        test_println!("InitGuard::drop; gen={:?}", self.generation());
+        let new_lifecycle = LifecycleGen::<C>::from_packed(self.curr_lifecycle)
+            .pack(Lifecycle::<C>::PRESENT.pack(0));
+        let _res = unsafe { self.slot.as_ref() }.lifecycle.compare_exchange(
+            self.curr_lifecycle,
+            new_lifecycle,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        test_println!("-> finished init: {:?}", _res);
+        debug_assert!(
+            _res.is_ok() || std::thread::panicking(),
+            "lifecycle changed under us! {:#b}",
+            _res.unwrap_err()
+        );
     }
 }
 

@@ -1,8 +1,7 @@
 use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
-    page::{self, slot},
-    shard,
+    page, shard,
     tid::Tid,
     Pack, Shard,
 };
@@ -117,9 +116,9 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    inner: page::slot::GuardMut<'a, T, C>,
-    shard: &'a Shard<T, C>,
+    inner: page::slot::InitGuard<T, C>,
     key: usize,
+    shard: &'a Shard<T, C>,
 }
 
 impl<T, C> Pool<T, C>
@@ -173,8 +172,8 @@ where
         let (tid, shard) = self.shards.current();
         test_println!("pool: create {:?}", tid);
         let (key, inner) = shard.init_with(|idx, slot| {
-            let gen = slot.initialize_state(|_| {}, slot::RefCount::EXCLUSIVE)?;
-            let guard = unsafe { slot.guard_mut() };
+            let guard = slot.init()?;
+            let gen = guard.generation();
             Some((gen.pack(idx), guard))
         })?;
         Some(PoolGuardMut {
@@ -212,42 +211,6 @@ where
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
         Some(PoolGuard { inner, shard, key })
-    }
-
-    /// Return a mutable reference to the value associated with the given key.
-    ///
-    /// If the value is already in use, this method will return `GetMutError::INUSE`. If the key
-    /// points to a non existant value, it will return `GetMutError::NONEXISTENT`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use sharded_slab::Pool;
-    /// let pool: Pool<String> = sharded_slab::Pool::new();
-    /// let key = pool.create(|item| item.push_str("Hello world")).unwrap();
-    ///
-    /// {
-    /// let mut value = pool.get_mut(key).unwrap();
-    /// assert_eq!(value, String::from("Hello world"));
-    ///
-    /// *value = "Mutable access!".to_string();
-    /// }
-    ///
-    /// assert_eq!(pool.get(key).unwrap(), String::from("Mutable access!"));
-    /// ```
-    pub fn get_mut(&self, key: usize) -> Result<PoolGuardMut<'_, T, C>, crate::GetMutError> {
-        let tid = C::unpack_tid(key);
-
-        test_println!("pool: get_mut {:?}; current={:?}", tid, Tid::<C>::current());
-        let shard = self
-            .shards
-            .get(tid.as_usize())
-            .ok_or(crate::GetMutError::NONEXISTENT)?;
-        let inner = shard
-            .with_slot(key, |slot| Some(slot.get_mut(C::unpack_gen(key))))
-            .ok_or(crate::GetMutError::NONEXISTENT)??;
-
-        Ok(PoolGuardMut { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
@@ -416,9 +379,25 @@ where
         self.key
     }
 
+    /// Downgrades the mutable guard to an immutable guard, allowing access to
+    /// the pooled value from other threads.
+    pub fn downgrade(self) -> PoolGuard<'a, T, C> {
+        let Self { inner, shard, key } = self;
+        drop(inner);
+        let inner = shard
+            .with_slot(key, |slot| slot.get(C::unpack_gen(key)))
+            .expect("generation advanced before a value was released?");
+        PoolGuard { inner, shard, key }
+    }
+
     #[inline]
     fn value(&self) -> &T {
-        self.inner.value()
+        unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive
+            // `self`.
+            self.inner.value()
+        }
     }
 }
 
@@ -440,24 +419,10 @@ where
     C: cfg::Config,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.inner.value_mut() }
-    }
-}
-
-impl<'a, T, C> Drop for PoolGuardMut<'a, T, C>
-where
-    T: Clear + Default,
-    C: cfg::Config,
-{
-    fn drop(&mut self) {
-        use crate::sync::atomic;
-        if self.inner.release() {
-            atomic::fence(atomic::Ordering::Acquire);
-            if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.mark_clear_local(self.key);
-            } else {
-                self.shard.mark_clear_remote(self.key);
-            }
+        unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive `self`.
+            self.inner.value_mut()
         }
     }
 }
