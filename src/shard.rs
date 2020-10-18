@@ -161,18 +161,18 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
-    pub(crate) fn init_with<F>(&self, mut func: F) -> Option<usize>
-    where
-        F: FnMut(&page::slot::Slot<T, C>) -> Option<page::slot::Generation<C>>,
-    {
-        // Can we fit the value into an existing page?
+    pub(crate) fn init_with<'a, U>(
+        &'a self,
+        mut init: impl FnMut(usize, &'a page::Slot<T, C>) -> Option<U>,
+    ) -> Option<U> {
+        // Can we fit the value into an exist`ing page?
         for (page_idx, page) in self.shared.iter().enumerate() {
             let local = self.local(page_idx);
 
             test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
-            if let Some(poff) = page.init_with(local, &mut func) {
-                return Some(poff);
+            if let Some(res) = page.init_with(local, &mut init) {
+                return Some(res);
             }
         }
 

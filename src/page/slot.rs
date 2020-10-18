@@ -20,6 +20,11 @@ pub(crate) struct Guard<'a, T, C: cfg::Config = cfg::DefaultConfig> {
     slot: &'a Slot<T, C>,
 }
 
+#[derive(Debug)]
+pub(crate) struct GuardMut<'a, T, C: cfg::Config = cfg::DefaultConfig> {
+    slot: &'a Slot<T, C>,
+}
+
 #[repr(transparent)]
 pub(crate) struct Generation<C = cfg::DefaultConfig> {
     value: usize,
@@ -97,11 +102,10 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get_mut<U>(
+    pub(crate) fn get_mut(
         &self,
         gen: Generation<C>,
-        f: impl FnOnce(&mut T) -> &mut U,
-    ) -> Result<Guard<'_, &mut U, C>, crate::GetMutError> {
+    ) -> Result<GuardMut<'_, T, C>, crate::GetMutError> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -136,21 +140,16 @@ where
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
-                    // Okay, the ref count was incremented successfully! We can
-                    // now return a guard!
-                    let item = self.item.with_mut(|value| unsafe {
-                        // Safety: the value will not be accessed while marked
-                        // exclusively.
-                        f(&mut *value)
-                    });
+                    // // Okay, the ref count was incremented successfully! We can
+                    // // now return a guard!
+                    // let item = self.item.with_mut(|value| unsafe {
+                    //     // Safety: the value will not be accessed while marked
+                    //     // exclusively.
+                    //     f(&mut *value)
+                    // });
 
                     test_println!("-> {:?}", new_refs);
-                    todo!()
-                    // return Ok(Guard {
-                    //     item,
-                    //     lifecycle: &self.lifecycle,
-                    //     _cfg: PhantomData,
-                    // });
+                    return Ok(GuardMut { slot: self });
                 }
                 Err(actual) => {
                     // Another thread modified the slot's state before us! We
@@ -362,17 +361,22 @@ where
     /// This method initializes and sets up the state for a slot. When being used in `Pool`, we
     /// only need to ensure that the `Slot` is in the right state, while when being used in a
     /// `Slab` we want to insert a value into it, as the memory is not initialized
-    pub(crate) fn initialize_state(&self, f: impl FnOnce(&mut T)) -> Option<Generation<C>> {
+    pub(crate) fn initialize_state(
+        &self,
+        f: impl FnOnce(&mut T),
+        new_refs: RefCount<C>,
+    ) -> Option<Generation<C>> {
         // Load the current lifecycle state.
         let lifecycle = self.lifecycle.load(Ordering::Acquire);
         let gen = LifecycleGen::from_packed(lifecycle).0;
         let refs = RefCount::<C>::from_packed(lifecycle);
 
         test_println!(
-            "-> initialize_state; state={:?}; gen={:?}; refs={:?}",
+            "-> initialize_state; state={:?}; gen={:?}; refs={:?}; new_refs={:?};",
             Lifecycle::<C>::from_packed(lifecycle),
             gen,
-            refs
+            refs,
+            new_refs,
         );
 
         if refs.value != 0 {
@@ -380,8 +384,7 @@ where
             return None;
         }
 
-        // Set the slot's state to NOT_REMOVED.
-        let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(0));
+        let new_lifecycle = gen.pack(Lifecycle::<C>::NOT_REMOVED.pack(new_refs.pack(0)));
         let was_set = self.lifecycle.compare_exchange(
             lifecycle,
             new_lifecycle,
@@ -407,6 +410,10 @@ where
 
         Some(gen)
     }
+
+    pub(crate) unsafe fn guard_mut(&self) -> GuardMut<'_, T, C> {
+        GuardMut { slot: self }
+    }
 }
 
 // Slot impl which _needs_ an `Option` for self.item, this is for `Slab` to use.
@@ -426,9 +433,12 @@ where
         debug_assert!(self.is_empty(), "inserted into full slot");
         debug_assert!(value.is_some(), "inserted twice");
 
-        let gen = self.initialize_state(|item| {
-            *item = value.take();
-        })?;
+        let gen = self.initialize_state(
+            |item| {
+                *item = value.take();
+            },
+            RefCount::NONE,
+        )?;
         test_println!("-> inserted at {:?}", gen);
 
         Some(gen)
@@ -520,6 +530,52 @@ where
     }
 }
 
+impl<T, C: cfg::Config> Slot<T, C> {
+    fn release(&self) -> bool {
+        let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
+        loop {
+            let refs = RefCount::<C>::from_packed(lifecycle);
+            let state = Lifecycle::<C>::from_packed(lifecycle).state;
+            let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+
+            // Are we the last guard, and is the slot marked for removal?
+            let dropping = refs.value == 1 && state == State::Marked;
+            let new_lifecycle = if dropping {
+                // If so, we want to advance the state to "removing"
+                gen.pack(State::Removing as usize)
+            } else {
+                // Otherwise, just subtract 1 from the ref count.
+                refs.decr().pack(lifecycle)
+            };
+
+            test_println!(
+                "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
+                state,
+                gen,
+                refs,
+                lifecycle,
+                new_lifecycle,
+                dropping
+            );
+            match self.lifecycle.compare_exchange(
+                lifecycle,
+                new_lifecycle,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    test_println!("-> drop guard: done;  dropping={:?}", dropping);
+                    return dropping;
+                }
+                Err(actual) => {
+                    test_println!("-> drop guard; retry, actual={:#x}", actual);
+                    lifecycle = actual;
+                }
+            }
+        }
+    }
+}
+
 impl<T, C: cfg::Config> fmt::Debug for Slot<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lifecycle = self.lifecycle.load(Ordering::Relaxed);
@@ -579,53 +635,32 @@ impl<C: cfg::Config> Copy for Generation<C> {}
 
 impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     pub(crate) fn release(&self) -> bool {
-        let mut lifecycle = self.slot.lifecycle.load(Ordering::Acquire);
-        loop {
-            let refs = RefCount::<C>::from_packed(lifecycle);
-            let state = Lifecycle::<C>::from_packed(lifecycle).state;
-            let gen = LifecycleGen::<C>::from_packed(lifecycle).0;
+        self.slot.release()
+    }
 
-            // Are we the last guard, and is the slot marked for removal?
-            let dropping = refs.value == 1 && state == State::Marked;
-            let new_lifecycle = if dropping {
-                // If so, we want to advance the state to "removing"
-                gen.pack(State::Removing as usize)
-            } else {
-                // Otherwise, just subtract 1 from the ref count.
-                refs.decr().pack(lifecycle)
-            };
+    pub(crate) fn slot(&self) -> &Slot<T, C> {
+        self.slot
+    }
 
-            test_println!(
-                "-> drop guard: state={:?}; gen={:?}; refs={:?}; lifecycle={:#x}; new_lifecycle={:#x}; dropping={:?}",
-                state,
-                gen,
-                refs,
-                lifecycle,
-                new_lifecycle,
-                dropping
-            );
-            match self.slot.lifecycle.compare_exchange(
-                lifecycle,
-                new_lifecycle,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    test_println!("-> drop guard: done;  dropping={:?}", dropping);
-                    return dropping;
-                }
-                Err(actual) => {
-                    test_println!("-> drop guard; retry, actual={:#x}", actual);
-                    lifecycle = actual;
-                }
-            }
-        }
+    #[inline(always)]
+    pub(crate) fn value(&self) -> &T {
+        self.slot.item.with(|item| unsafe { &*item })
     }
 }
 
-impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
-    pub(crate) fn slot(&self) -> &Slot<T, C> {
-        self.slot
+impl<'a, T, C: cfg::Config> GuardMut<'a, T, C> {
+    pub(crate) fn release(&self) -> bool {
+        self.slot.release()
+    }
+
+    #[inline(always)]
+    pub(crate) fn value(&self) -> &T {
+        self.slot.item.with(|item| unsafe { &*item })
+    }
+
+    #[inline(always)]
+    pub(crate) fn value_mut(&self) -> &mut T {
+        self.slot.item.with_mut(|item| unsafe { &mut *item })
     }
 }
 
@@ -706,8 +741,13 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 impl<C: cfg::Config> RefCount<C> {
     pub(crate) const MAX: usize = Self::BITS - 1;
 
-    const EXCLUSIVE: Self = Self {
+    pub(crate) const EXCLUSIVE: Self = Self {
         value: Self::BITS,
+        _cfg: PhantomData,
+    };
+
+    const NONE: Self = Self {
+        value: 0,
         _cfg: PhantomData,
     };
 
