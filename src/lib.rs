@@ -218,7 +218,7 @@ macro_rules! test_println {
 mod clear;
 pub mod implementation;
 mod page;
-mod pool;
+// mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -228,7 +228,8 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
-pub use pool::{Pool, PoolGuard, PoolGuardMut};
+use std::ptr;
+// pub use pool::{Pool, PoolGuard, PoolGuardMut};
 
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
@@ -247,7 +248,8 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, &'a T, C>,
+    inner: page::slot::Guard<'a, Option<T>, C>,
+    value: ptr::NonNull<T>,
     shard: &'a Shard<Option<T>, C>,
     key: usize,
 }
@@ -477,15 +479,14 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.with_slot(key, |slot| {
-            slot.get(C::unpack_gen(key), |x| {
-                x.as_ref().expect(
-                    "if a slot can be accessed at the current generation, its value must be `Some`",
-                )
-            })
-        })?;
-
-        Some(Guard { inner, shard, key })
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
+        let value = ptr::NonNull::from(inner.slot().value().as_ref().unwrap());
+        Some(Guard {
+            inner,
+            value,
+            shard,
+            key,
+        })
     }
 
     /// Return a mutable reference to the value associated with the given key.
@@ -509,24 +510,25 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// assert_eq!(slab.get(key).unwrap(), "Mutable access!");
     /// ```
     pub fn get_mut(&self, key: usize) -> Result<GuardMut<'_, T, C>, GetMutError> {
-        let tid = C::unpack_tid(key);
+        // let tid = C::unpack_tid(key);
 
-        test_println!("get_mut {:?}; current={:?}", tid, Tid::<C>::current());
-        let shard = self
-            .shards
-            .get(tid.as_usize())
-            .ok_or(GetMutError::NONEXISTENT)?;
-        let inner = shard
-            .with_slot(key, |slot| {
-                Some(slot.get_mut(C::unpack_gen(key), |x| {
-                    x.as_mut().expect(
-                    "if a slot can be accessed at the current generation, its value must be `Some`",
-                )
-                }))
-            })
-            .ok_or(GetMutError::NONEXISTENT)??;
+        // test_println!("get_mut {:?}; current={:?}", tid, Tid::<C>::current());
+        // let shard = self
+        //     .shards
+        //     .get(tid.as_usize())
+        //     .ok_or(GetMutError::NONEXISTENT)?;
+        // let inner = shard
+        //     .with_slot(key, |slot| {
+        //         Some(slot.get_mut(C::unpack_gen(key), |x| {
+        //             x.as_mut().expect(
+        //             "if a slot can be accessed at the current generation, its value must be `Some`",
+        //         )
+        //         }))
+        //     })
+        //     .ok_or(GetMutError::NONEXISTENT)??;
 
-        Ok(GuardMut { inner, shard, key })
+        // Ok(GuardMut { inner, shard, key })
+        todo!()
     }
 
     /// Returns `true` if the slab contains a value for the given key.
@@ -585,13 +587,23 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     pub fn key(&self) -> usize {
         self.key
     }
+
+    #[inline(always)]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: this is always going to be valid, as it's projected from
+            // the safe reference to `self.value` --- this is just to avoid
+            // having to `expect` an option in the hot path when dereferencing.
+            self.value.as_ref()
+        }
+    }
 }
 
 impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        self.value()
     }
 }
 
@@ -615,7 +627,7 @@ where
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        fmt::Debug::fmt(self.value(), f)
     }
 }
 
@@ -625,7 +637,7 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().eq(other)
+        self.value().eq(other)
     }
 }
 
@@ -642,13 +654,15 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for GuardMut<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        // self.inner.item()
+        todo!()
     }
 }
 
 impl<'a, T, C: cfg::Config> std::ops::DerefMut for GuardMut<'a, T, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.item_mut()
+        // self.inner.item_mut()
+        todo!()
     }
 }
 
@@ -672,7 +686,8 @@ where
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        // fmt::Debug::fmt(self.inner.item(), f)
+        todo!()
     }
 }
 
@@ -682,7 +697,8 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().eq(other)
+        // self.inner.item().eq(other)
+        todo!()
     }
 }
 

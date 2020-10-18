@@ -65,7 +65,7 @@ pub(crate) mod util {
     }
 }
 
-#[cfg(loom)]
-mod loom_pool;
+// #[cfg(loom)]
+// mod loom_pool;
 #[cfg(loom)]
 mod loom_slab;

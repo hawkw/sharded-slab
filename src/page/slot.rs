@@ -16,10 +16,8 @@ pub(crate) struct Slot<T, C> {
 }
 
 #[derive(Debug)]
-pub(crate) struct Guard<'a, T, C = cfg::DefaultConfig> {
-    item: T,
-    lifecycle: &'a AtomicUsize,
-    _cfg: PhantomData<fn(C)>,
+pub(crate) struct Guard<'a, T, C: cfg::Config = cfg::DefaultConfig> {
+    slot: &'a Slot<T, C>,
 }
 
 #[repr(transparent)]
@@ -87,7 +85,7 @@ where
     }
 
     #[inline(always)]
-    pub(super) fn value(&self) -> &T {
+    pub(crate) fn value(&self) -> &T {
         self.item.with(|item| unsafe { &*item })
     }
 
@@ -147,12 +145,12 @@ where
                     });
 
                     test_println!("-> {:?}", new_refs);
-
-                    return Ok(Guard {
-                        item,
-                        lifecycle: &self.lifecycle,
-                        _cfg: PhantomData,
-                    });
+                    todo!()
+                    // return Ok(Guard {
+                    //     item,
+                    //     lifecycle: &self.lifecycle,
+                    //     _cfg: PhantomData,
+                    // });
                 }
                 Err(actual) => {
                     // Another thread modified the slot's state before us! We
@@ -169,11 +167,11 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get<'a, U>(
+    pub(crate) fn get<'a>(
         &'a self,
         gen: Generation<C>,
-        f: impl FnOnce(&'a T) -> &'a U,
-    ) -> Option<Guard<'a, &'a U, C>> {
+        // f: impl FnOnce(&'a T) -> &'a U,
+    ) -> Option<Guard<'a, T, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -210,15 +208,11 @@ where
                 Ok(_) => {
                     // Okay, the ref count was incremented successfully! We can
                     // now return a guard!
-                    let item = f(self.value());
+                    // let item = f(self.value());
 
                     test_println!("-> {:?}", new_refs);
 
-                    return Some(Guard {
-                        item,
-                        lifecycle: &self.lifecycle,
-                        _cfg: PhantomData,
-                    });
+                    return Some(Guard { slot: self });
                 }
                 Err(actual) => {
                     // Another thread modified the slot's state before us! We
@@ -585,7 +579,7 @@ impl<C: cfg::Config> Copy for Generation<C> {}
 
 impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     pub(crate) fn release(&self) -> bool {
-        let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
+        let mut lifecycle = self.slot.lifecycle.load(Ordering::Acquire);
         loop {
             let refs = RefCount::<C>::from_packed(lifecycle);
             let state = Lifecycle::<C>::from_packed(lifecycle).state;
@@ -610,7 +604,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
                 new_lifecycle,
                 dropping
             );
-            match self.lifecycle.compare_exchange(
+            match self.slot.lifecycle.compare_exchange(
                 lifecycle,
                 new_lifecycle,
                 Ordering::AcqRel,
@@ -629,17 +623,17 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     }
 }
 
-impl<'a, T: std::ops::Deref, C: cfg::Config> Guard<'a, T, C> {
-    pub(crate) fn item(&self) -> &T::Target {
-        &*self.item
+impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
+    pub(crate) fn slot(&self) -> &Slot<T, C> {
+        self.slot
     }
 }
 
-impl<'a, T, C: cfg::Config> Guard<'a, &'a mut T, C> {
-    pub(crate) fn item_mut(&mut self) -> &mut T {
-        self.item
-    }
-}
+// impl<'a, T, C: cfg::Config> Guard<'a, &'a mut T, C> {
+//     pub(crate) fn item_mut(&mut self) -> &mut T {
+//         self.item
+//     }
+// }
 
 // === impl Lifecycle ===
 
