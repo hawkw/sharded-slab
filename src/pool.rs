@@ -94,7 +94,7 @@ where
 /// While the guard exists, it indicates to the pool that the item the guard references is
 /// currently being accessed. If the item is removed from the pool while the guard exists, the
 /// removal will be deferred until all guards are dropped.
-pub struct PoolGuard<'a, T, C>
+pub struct Entry<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -111,7 +111,7 @@ where
 /// while a guard exists, the removal will be deferred until the guard is
 /// dropped. The slot cannot be accessed by other threads while it is accessed
 /// mutably.
-pub struct PoolGuardMut<'a, T, C = DefaultConfig>
+pub struct EntryMut<'a, T, C = DefaultConfig>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -168,7 +168,7 @@ where
     ///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
     /// }).join().unwrap();
     /// ```
-    pub fn create(&self) -> Option<PoolGuardMut<'_, T, C>> {
+    pub fn create(&self) -> Option<EntryMut<'_, T, C>> {
         let (tid, shard) = self.shards.current();
         test_println!("pool: create {:?}", tid);
         let (key, inner) = shard.init_with(|idx, slot| {
@@ -176,7 +176,7 @@ where
             let gen = guard.generation();
             Some((gen.pack(idx), guard))
         })?;
-        Some(PoolGuardMut {
+        Some(EntryMut {
             inner,
             key: tid.pack(key),
             shard,
@@ -204,13 +204,13 @@ where
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     /// assert!(pool.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<PoolGuard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<Entry<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
-        Some(PoolGuard { inner, shard, key })
+        Some(Entry { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
@@ -300,7 +300,7 @@ where
     }
 }
 
-impl<'a, T, C> PoolGuard<'a, T, C>
+impl<'a, T, C> Entry<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -316,7 +316,7 @@ where
     }
 }
 
-impl<'a, T, C> std::ops::Deref for PoolGuard<'a, T, C>
+impl<'a, T, C> std::ops::Deref for Entry<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -328,14 +328,14 @@ where
     }
 }
 
-impl<'a, T, C> Drop for PoolGuard<'a, T, C>
+impl<'a, T, C> Drop for Entry<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
 {
     fn drop(&mut self) {
         use crate::sync::atomic;
-        test_println!(" -> drop PoolGuard: clearing data");
+        test_println!(" -> drop Entry: clearing data");
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
@@ -347,7 +347,7 @@ where
     }
 }
 
-impl<'a, T, C> fmt::Debug for PoolGuard<'a, T, C>
+impl<'a, T, C> fmt::Debug for Entry<'a, T, C>
 where
     T: fmt::Debug + Clear + Default,
     C: cfg::Config,
@@ -357,7 +357,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for PoolGuard<'a, T, C>
+impl<'a, T, C> PartialEq<T> for Entry<'a, T, C>
 where
     T: PartialEq<T> + Clear + Default,
     C: cfg::Config,
@@ -369,7 +369,7 @@ where
 
 // === impl GuardMut ===
 
-impl<'a, T, C: cfg::Config> PoolGuardMut<'a, T, C>
+impl<'a, T, C: cfg::Config> EntryMut<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -381,13 +381,13 @@ where
 
     /// Downgrades the mutable guard to an immutable guard, allowing access to
     /// the pooled value from other threads.
-    pub fn downgrade(self) -> PoolGuard<'a, T, C> {
+    pub fn downgrade(self) -> Entry<'a, T, C> {
         let Self { inner, shard, key } = self;
         drop(inner);
         let inner = shard
             .with_slot(key, |slot| slot.get(C::unpack_gen(key)))
             .expect("generation advanced before a value was released?");
-        PoolGuard { inner, shard, key }
+        Entry { inner, shard, key }
     }
 
     #[inline]
@@ -401,7 +401,7 @@ where
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for PoolGuardMut<'a, T, C>
+impl<'a, T, C: cfg::Config> std::ops::Deref for EntryMut<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -413,7 +413,7 @@ where
     }
 }
 
-impl<'a, T, C> std::ops::DerefMut for PoolGuardMut<'a, T, C>
+impl<'a, T, C> std::ops::DerefMut for EntryMut<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -427,7 +427,7 @@ where
     }
 }
 
-impl<'a, T, C> fmt::Debug for PoolGuardMut<'a, T, C>
+impl<'a, T, C> fmt::Debug for EntryMut<'a, T, C>
 where
     T: fmt::Debug + Clear + Default,
     C: cfg::Config,
@@ -437,7 +437,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for PoolGuardMut<'a, T, C>
+impl<'a, T, C> PartialEq<T> for EntryMut<'a, T, C>
 where
     T: PartialEq<T> + Clear + Default,
     C: cfg::Config,

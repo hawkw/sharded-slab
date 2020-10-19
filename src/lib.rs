@@ -218,7 +218,7 @@ macro_rules! test_println {
 mod clear;
 pub mod implementation;
 mod page;
-mod pool;
+pub mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -228,7 +228,7 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
-pub use pool::{Pool, PoolGuard, PoolGuardMut};
+pub use pool::Pool;
 use std::ptr;
 
 use shard::Shard;
