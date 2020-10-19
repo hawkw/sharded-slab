@@ -399,7 +399,7 @@ where
 {
     pub(in crate::page) fn new(next: usize) -> Self {
         Self {
-            lifecycle: AtomicUsize::new(0),
+            lifecycle: AtomicUsize::new(Lifecycle::<C>::REMOVING.as_usize()),
             item: UnsafeCell::new(T::default()),
             next: UnsafeCell::new(next),
             _cfg: PhantomData,
@@ -576,7 +576,10 @@ impl<C: cfg::Config> Lifecycle<C> {
         state: State::Marked,
         _cfg: PhantomData,
     };
-
+    const REMOVING: Self = Self {
+        state: State::Removing,
+        _cfg: PhantomData,
+    };
     const PRESENT: Self = Self {
         state: State::Present,
         _cfg: PhantomData,
