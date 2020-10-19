@@ -215,10 +215,23 @@ macro_rules! test_println {
         }
     }
 }
+
+#[cfg(all(test, loom))]
+macro_rules! test_dbg {
+    ($e:expr) => {
+        match $e {
+            e => {
+                test_println!("{} = {:?}", stringify!($e), &e);
+                e
+            }
+        }
+    };
+}
+
 mod clear;
 pub mod implementation;
 mod page;
-mod pool;
+pub mod pool;
 pub(crate) mod sync;
 mod tid;
 pub(crate) use tid::Tid;
@@ -228,7 +241,9 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
-pub use pool::{Pool, PoolGuard};
+#[doc(inline)]
+pub use pool::Pool;
+use std::ptr;
 
 use shard::Shard;
 use std::{fmt, marker::PhantomData};
@@ -247,7 +262,8 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, T, C>,
+    inner: page::slot::Guard<'a, Option<T>, C>,
+    value: ptr::NonNull<T>,
     shard: &'a Shard<Option<T>, C>,
     key: usize,
 }
@@ -304,7 +320,10 @@ impl<T, C: cfg::Config> Slab<T, C> {
         test_println!("insert {:?}", tid);
         let mut value = Some(value);
         shard
-            .init_with(|slot| slot.insert(&mut value))
+            .init_with(|idx, slot| {
+                let gen = slot.insert(&mut value)?;
+                Some(gen.pack(idx))
+            })
             .map(|idx| tid.pack(idx))
     }
 
@@ -452,13 +471,14 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.get(key, |x| {
-            x.as_ref().expect(
-                "if a slot can be accessed at the current generation, its value must be `Some`",
-            )
-        })?;
-
-        Some(Guard { inner, shard, key })
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
+        let value = ptr::NonNull::from(inner.slot().value().as_ref().unwrap());
+        Some(Guard {
+            inner,
+            value,
+            shard,
+            key,
+        })
     }
 
     /// Returns `true` if the slab contains a value for the given key.
@@ -517,13 +537,23 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     pub fn key(&self) -> usize {
         self.key
     }
+
+    #[inline(always)]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: this is always going to be valid, as it's projected from
+            // the safe reference to `self.value` --- this is just to avoid
+            // having to `expect` an option in the hot path when dereferencing.
+            self.value.as_ref()
+        }
+    }
 }
 
 impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        self.value()
     }
 }
 
@@ -547,7 +577,7 @@ where
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        fmt::Debug::fmt(self.value(), f)
     }
 }
 
@@ -557,7 +587,7 @@ where
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        self.inner.item().eq(other)
+        self.value().eq(other)
     }
 }
 

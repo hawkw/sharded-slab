@@ -265,7 +265,7 @@ fn concurrent_remove_remote_and_reuse() {
 }
 
 struct SetDropped {
-    value: usize,
+    val: usize,
     dropped: std::sync::Arc<AtomicBool>,
 }
 
@@ -274,10 +274,10 @@ struct AssertDropped {
 }
 
 impl AssertDropped {
-    fn new(value: usize) -> (Self, SetDropped) {
+    fn new(val: usize) -> (Self, SetDropped) {
         let dropped = std::sync::Arc::new(AtomicBool::new(false));
         let val = SetDropped {
-            value,
+            val,
             dropped: dropped.clone(),
         };
         (Self { dropped }, val)
@@ -358,7 +358,7 @@ fn remove_remote_during_insert() {
 
         let t1 = thread::spawn(move || {
             let g = slab2.get(idx);
-            assert_ne!(g.as_ref().map(|v| v.value), Some(2));
+            assert_ne!(g.as_ref().map(|v| v.val), Some(2));
             drop(g);
         });
 

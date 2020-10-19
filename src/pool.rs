@@ -1,7 +1,15 @@
+//! A lock-free concurrent object pool.
+//!
+//! See the [`Pool` type's documentation][pool] for details on the object pool API and how
+//! it differs from the [`Slab`] API.
+//!
+//! [pool]: ../struct.Pool.html
+//! [`Slab`]: ../struct.Slab.html
 use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
     page, shard,
+    sync::atomic,
     tid::Tid,
     Pack, Shard,
 };
@@ -31,17 +39,30 @@ use std::{fmt, marker::PhantomData};
 /// # use sharded_slab::Pool;
 /// let pool: Pool<String> = Pool::new();
 ///
-/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
 /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
 /// ```
 ///
-/// Pool entries can be cleared either by manually calling [`Pool::clear`]. This marks the entry to
+/// Create a new pooled item, returning a guard that allows mutable access:
+/// ```
+/// # use sharded_slab::Pool;
+/// let pool: Pool<String> = Pool::new();
+///
+/// let mut guard = pool.create().unwrap();
+/// let key = guard.key();
+/// guard.push_str("hello world");
+///
+/// drop(guard); // release the guard, allowing immutable access.
+/// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// ```
+///
+/// Pool entries can be cleared by calling [`Pool::clear`]. This marks the entry to
 /// be cleared when the guards referencing to it are dropped.
 /// ```
 /// # use sharded_slab::Pool;
 /// let pool: Pool<String> = Pool::new();
 ///
-/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
 ///
 /// // Mark this entry to be cleared.
 /// pool.clear(key);
@@ -94,12 +115,29 @@ where
 /// While the guard exists, it indicates to the pool that the item the guard references is
 /// currently being accessed. If the item is removed from the pool while the guard exists, the
 /// removal will be deferred until all guards are dropped.
-pub struct PoolGuard<'a, T, C>
+pub struct Ref<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
 {
     inner: page::slot::Guard<'a, T, C>,
+    shard: &'a Shard<T, C>,
+    key: usize,
+}
+
+/// A guard that allows exclusive mutable access to an object in a pool.
+///
+/// While the guard exists, it indicates to the pool that the item the guard
+/// references is currently being accessed. If the item is removed from the pool
+/// while a guard exists, the removal will be deferred until the guard is
+/// dropped. The slot cannot be accessed by other threads while it is accessed
+/// mutably.
+pub struct RefMut<'a, T, C = DefaultConfig>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    inner: page::slot::InitGuard<T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
@@ -124,7 +162,8 @@ where
     /// [`Slab::insert`]: struct.Slab.html#method.insert
     pub const USED_BITS: usize = C::USED_BITS;
 
-    /// Creates a new object in the pool, returning a key that can be used to access it.
+    /// Creates a new object in the pool, returning an [`RefMut`] guard that
+    /// may be used to mutate the new object.
     ///
     /// If this function returns `None`, then the shard for the current thread is full and no items
     /// can be added until some are removed, or the maximum number of shards has been reached.
@@ -132,20 +171,68 @@ where
     /// # Examples
     /// ```rust
     /// # use sharded_slab::Pool;
+    /// # use std::thread;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create(|item| item.push_str("Hello")).unwrap();
-    /// assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    ///
+    /// // Create a new pooled item, returning a guard that allows mutable
+    /// // access to the new item.
+    /// let mut item = pool.create().unwrap();
+    /// // Return a key that allows indexing the created item once the guard
+    /// // has been dropped.
+    /// let key = item.key();
+    ///
+    /// // Mutate the item.
+    /// item.push_str("Hello");
+    /// // Drop the guard, releasing mutable access to the new item.
+    /// drop(item);
+    ///
+    /// /// Other threads may now (immutably) access the item using the returned key.
+    /// thread::spawn(move || {
+    ///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    /// }).join().unwrap();
     /// ```
-    pub fn create(&self, initializer: impl FnOnce(&mut T)) -> Option<usize> {
+    ///
+    /// [`RefMut`]: pool/struct.RefMut.html
+    pub fn create(&self) -> Option<RefMut<'_, T, C>> {
         let (tid, shard) = self.shards.current();
-        let mut init = Some(initializer);
         test_println!("pool: create {:?}", tid);
-        shard
-            .init_with(|slot| {
-                let init = init.take().expect("initializer will only be called once");
-                slot.initialize_state(init)
-            })
-            .map(|idx| tid.pack(idx))
+        let (key, inner) = shard.init_with(|idx, slot| {
+            let guard = slot.init()?;
+            let gen = guard.generation();
+            Some((gen.pack(idx), guard))
+        })?;
+        Some(RefMut {
+            inner,
+            key: tid.pack(key),
+            shard,
+        })
+    }
+
+    /// Creates a new object in the pool with the provided initializer,
+    /// returning a key that may be used to access the new object.
+    ///
+    /// If this function returns `None`, then the shard for the current thread is full and no items
+    /// can be added until some are removed, or the maximum number of shards has been reached.
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// # use std::thread;
+    /// let pool: Pool<String> = Pool::new();
+    ///
+    /// // Create a new pooled item, returning its integer key.
+    /// let key = pool.create_with(|s| s.push_str("Hello")).unwrap();
+    ///
+    /// /// Other threads may now (immutably) access the item using the key.
+    /// thread::spawn(move || {
+    ///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    /// }).join().unwrap();
+    /// ```
+    pub fn create_with(&self, init: impl FnOnce(&mut T)) -> Option<usize> {
+        test_println!("pool: create_with");
+        let mut guard = self.create()?;
+        init(&mut guard);
+        Some(guard.key())
     }
 
     /// Return a reference to the value associated with the given key.
@@ -156,20 +243,19 @@ where
     ///
     /// ```rust
     /// # use sharded_slab::Pool;
-    /// let pool: Pool<String> = sharded_slab::Pool::new();
-    /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+    /// let pool: Pool<String> = Pool::new();
+    /// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     /// assert!(pool.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<PoolGuard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<Ref<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.get(key, |x| x)?;
-
-        Some(PoolGuard { inner, shard, key })
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
+        Some(Ref { inner, shard, key })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
@@ -184,7 +270,12 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+    ///
+    /// // Check out an item from the pool.
+    /// let mut item = pool.create().unwrap();
+    /// let key = item.key();
+    /// item.push_str("hello world");
+    /// drop(item);
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     ///
@@ -196,7 +287,7 @@ where
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
     ///
-    /// let key = pool.create(|item| item.push_str("Hello world!")).unwrap();
+    /// let key = pool.create_with(|item| item.push_str("Hello world!")).unwrap();
     ///
     /// // Clearing a key that doesn't exist in the `Pool` will return `false`
     /// assert_eq!(pool.clear(key + 69420), false);
@@ -259,7 +350,7 @@ where
     }
 }
 
-impl<'a, T, C> PoolGuard<'a, T, C>
+impl<'a, T, C> Ref<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -268,9 +359,14 @@ where
     pub fn key(&self) -> usize {
         self.key
     }
+
+    #[inline]
+    fn value(&self) -> &T {
+        self.inner.value()
+    }
 }
 
-impl<'a, T, C> std::ops::Deref for PoolGuard<'a, T, C>
+impl<'a, T, C> std::ops::Deref for Ref<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -278,18 +374,17 @@ where
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.item()
+        self.value()
     }
 }
 
-impl<'a, T, C> Drop for PoolGuard<'a, T, C>
+impl<'a, T, C> Drop for Ref<'a, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
 {
     fn drop(&mut self) {
-        use crate::sync::atomic;
-        test_println!(" -> drop PoolGuard: clearing data");
+        test_println!("-> drop Ref: try clearing data");
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
@@ -301,22 +396,164 @@ where
     }
 }
 
-impl<'a, T, C> fmt::Debug for PoolGuard<'a, T, C>
+impl<'a, T, C> fmt::Debug for Ref<'a, T, C>
 where
     T: fmt::Debug + Clear + Default,
     C: cfg::Config,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.inner.item(), f)
+        fmt::Debug::fmt(self.value(), f)
     }
 }
 
-impl<'a, T, C> PartialEq<T> for PoolGuard<'a, T, C>
+impl<'a, T, C> PartialEq<T> for Ref<'a, T, C>
 where
     T: PartialEq<T> + Clear + Default,
     C: cfg::Config,
 {
     fn eq(&self, other: &T) -> bool {
-        *self.inner.item() == *other
+        *self.value() == *other
+    }
+}
+
+// === impl GuardMut ===
+
+impl<'a, T, C: cfg::Config> RefMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Returns the key used to access the guard.
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    /// Downgrades the mutable guard to an immutable guard, allowing access to
+    /// the pooled value from other threads.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// # use std::{sync::Arc, thread};
+    /// let pool = Arc::new(Pool::<String>::new());
+    ///
+    /// let mut guard_mut = pool.create().unwrap();
+    /// let key = guard_mut.key();
+    /// guard_mut.push_str("Hello");
+    ///
+    /// // The pooled string is currently borrowed mutably, so other threads
+    /// // may not access it.
+    /// let pool2 = pool.clone();
+    /// thread::spawn(move || {
+    ///     assert!(pool2.get(key).is_none())
+    /// }).join().unwrap();
+    ///
+    /// // Downgrade the guard to an immutable reference.
+    /// let guard = guard_mut.downgrade();
+    ///
+    /// // Now, other threads may also access the pooled value.
+    /// let pool2 = pool.clone();
+    /// thread::spawn(move || {
+    ///     let guard = pool2.get(key)
+    ///         .expect("the item may now be referenced by other threads");
+    ///     assert_eq!(guard, String::from("Hello"));
+    /// }).join().unwrap();
+    ///
+    /// // We can still access the value immutably through the downgraded guard.
+    /// assert_eq!(guard, String::from("Hello"));
+    /// ```
+    pub fn downgrade(mut self) -> Ref<'a, T, C> {
+        unsafe {
+            self.inner.release();
+        }
+        let inner = self
+            .shard
+            .with_slot(self.key, |slot| slot.get(C::unpack_gen(self.key)))
+            .expect("generation advanced before a value was released?");
+        Ref {
+            inner,
+            shard: self.shard,
+            key: self.key,
+        }
+    }
+
+    #[inline]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive
+            // `self`.
+            self.inner.value()
+        }
+    }
+}
+
+impl<'a, T, C: cfg::Config> std::ops::Deref for RefMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl<'a, T, C> std::ops::DerefMut for RefMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive `self`.
+            self.inner.value_mut()
+        }
+    }
+}
+
+impl<'a, T, C> Drop for RefMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        test_println!(" -> drop RefMut: try clearing data");
+        let should_clear = unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive `self`.
+            self.inner.release()
+        };
+        if should_clear {
+            atomic::fence(atomic::Ordering::Acquire);
+            if Tid::<C>::current().as_usize() == self.shard.tid {
+                self.shard.mark_clear_local(self.key);
+            } else {
+                self.shard.mark_clear_remote(self.key);
+            }
+        }
+    }
+}
+
+impl<'a, T, C> fmt::Debug for RefMut<'a, T, C>
+where
+    T: fmt::Debug + Clear + Default,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.value(), f)
+    }
+}
+
+impl<'a, T, C> PartialEq<T> for RefMut<'a, T, C>
+where
+    T: PartialEq<T> + Clear + Default,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.value().eq(other)
     }
 }
