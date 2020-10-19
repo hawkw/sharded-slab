@@ -216,7 +216,7 @@ macro_rules! test_println {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, loom))]
 macro_rules! test_dbg {
     ($e:expr) => {
         match $e {
