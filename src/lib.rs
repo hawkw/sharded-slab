@@ -629,9 +629,9 @@ impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.remove_local(self.key);
+                self.shard.take_local(self.key);
             } else {
-                self.shard.remove_remote(self.key);
+                self.shard.take_remote(self.key);
             }
         }
     }

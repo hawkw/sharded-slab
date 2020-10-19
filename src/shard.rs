@@ -202,6 +202,29 @@ where
         shared.mark_clear(addr, C::unpack_gen(idx), shared.free_list())
     }
 
+    pub(crate) fn clear_local(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        self.shared[page_index].clear(addr, C::unpack_gen(idx), self.local(page_index))
+    }
+
+    pub(crate) fn clear_remote(&self, idx: usize) -> bool {
+        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        let (addr, page_index) = page::indices::<C>(idx);
+
+        if page_index > self.shared.len() {
+            return false;
+        }
+
+        let shared = &self.shared[page_index];
+        shared.clear(addr, C::unpack_gen(idx), shared.free_list())
+    }
+
     #[inline(always)]
     fn local(&self, i: usize) -> &page::Local {
         #[cfg(debug_assertions)]

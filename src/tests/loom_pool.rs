@@ -117,8 +117,9 @@ fn concurrent_create_with_clear() {
         while next.is_none() {
             next = cvar.wait(next).unwrap();
         }
-        assert!(!pool.clear(idx1));
-
+        // the item should be marked (clear returns true)...
+        assert!(pool.clear(idx1));
+        // ...but the value shouldn't be removed yet.
         item1.assert_not_clear();
 
         t1.join().expect("thread 1 unable to join");
