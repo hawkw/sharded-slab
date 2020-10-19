@@ -117,8 +117,8 @@ where
     C: cfg::Config,
 {
     inner: page::slot::InitGuard<T, C>,
-    key: usize,
     shard: &'a Shard<T, C>,
+    key: usize,
 }
 
 impl<T, C> Pool<T, C>
