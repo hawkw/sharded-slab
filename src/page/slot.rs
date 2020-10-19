@@ -705,14 +705,41 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
         LifecycleGen::<C>::from_packed(self.curr_lifecycle).0
     }
 
+    /// Returns a borrowed reference to the slot's value.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `InitGuard` does not outlive the slab that
+    /// contains the pointed slot. Failure to do so means this pointer may
+    /// dangle.
     pub(crate) unsafe fn value(&self) -> &T {
         self.slot.as_ref().item.with(|val| &*val)
     }
 
+    /// Returns a mutably borrowed reference to the slot's value.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `InitGuard` does not outlive the slab that
+    /// contains the pointed slot. Failure to do so means this pointer may
+    /// dangle.
+    ///
+    /// It's safe to reference the slot mutably, though, because creating an
+    /// `InitGuard` ensures there are no outstanding immutable references.
     pub(crate) unsafe fn value_mut(&mut self) -> &mut T {
         self.slot.as_ref().item.with_mut(|val| &mut *val)
     }
 
+    /// Releases the guard, returning whether the slot should be cleared.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `InitGuard` does not outlive the slab that
+    /// contains the pointed slot. Failure to do so means this pointer may
+    /// dangle.
     pub(crate) unsafe fn release(&mut self) -> bool {
         test_println!(
             "InitGuard::release; curr_lifecycle={:?};",
