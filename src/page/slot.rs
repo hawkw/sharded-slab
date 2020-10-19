@@ -166,12 +166,13 @@ where
         }
     }
 
-    /// Marks this slot for mutation
+    /// Marks this slot to be released, returning `true` if the slot can be
+    /// mutated *now* and `false` otherwise.
     ///
     /// This method checks if there are any references to this slot. If there _are_ valid
     /// references, it just marks them for modification and returns and the next thread calling
     /// either `clear_storage` or `remove_value` will try and modify the storage
-    fn mark_release(&self, gen: Generation<C>) -> bool {
+    fn mark_release(&self, gen: Generation<C>) -> Option<bool> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         let mut curr_gen;
 
@@ -187,8 +188,22 @@ where
 
             // Is the slot still at the generation we are trying to remove?
             if gen != curr_gen {
-                return false;
+                return None;
             }
+
+            let state = Lifecycle::<C>::from_packed(lifecycle).state;
+            test_println!("-> mark_release; state={:?};", state);
+            match state {
+                State::Removing => {
+                    test_println!("--> mark_release; cannot release (already removed!)");
+                    return None;
+                }
+                State::Marked => {
+                    test_println!("--> mark_release; already marked;");
+                    break;
+                }
+                State::Present => {}
+            };
 
             // Set the new state to `MARKED`.
             let new_lifecycle = Lifecycle::<C>::MARKED.pack(lifecycle);
@@ -218,7 +233,7 @@ where
 
         // Are there currently outstanding references to the slot? If so, it
         // will have to be removed when those references are dropped.
-        refs.value > 0
+        Some(refs.value == 0)
     }
 
     /// Mutates this slot.
@@ -358,7 +373,8 @@ where
         Some(gen)
     }
 
-    /// Tries to remove the value in the slot
+    /// Tries to remove the value in the slot, returning `true` if the value was
+    /// removed.
     ///
     /// This method tries to remove the value in the slot. If there are existing references, then
     /// the slot is marked for removal and the next thread calling either this method or
@@ -369,14 +385,32 @@ where
         gen: Generation<C>,
         offset: usize,
         free: &F,
-    ) -> Option<T> {
-        if self.mark_release(gen) {
-            None
-        } else {
-            // Otherwise, we can remove the slot now!
+    ) -> bool {
+        let should_remove = match self.mark_release(gen) {
+            // If `mark_release` returns `Some`, a value exists at this
+            // generation. The bool inside this option indicates whether or not
+            // _we're_ allowed to remove the value.
+            Some(should_remove) => should_remove,
+            // Otherwise, the generation we tried to remove has already expired,
+            // and we did not mark anything for removal.
+            None => {
+                test_println!(
+                    "-> try_remove_value; nothing exists at generation={:?}",
+                    gen
+                );
+                return false;
+            }
+        };
+
+        test_println!("-> try_remove_value; marked!");
+
+        if should_remove {
+            // We're allowed to remove the slot now!
             test_println!("-> try_remove_value; can remove now");
-            self.remove_value(gen, offset, free)
+            self.remove_value(gen, offset, free);
         }
+
+        true
     }
 
     #[inline]
@@ -416,13 +450,31 @@ where
         offset: usize,
         free: &F,
     ) -> bool {
-        if self.mark_release(gen) {
-            return false;
+        let should_clear = match self.mark_release(gen) {
+            // If `mark_release` returns `Some`, a value exists at this
+            // generation. The bool inside this option indicates whether or not
+            // _we're_ allowed to clear the value.
+            Some(should_clear) => should_clear,
+            // Otherwise, the generation we tried to remove has already expired,
+            // and we did not mark anything for removal.
+            None => {
+                test_println!(
+                    "-> try_clear_storage; nothing exists at generation={:?}",
+                    gen
+                );
+                return false;
+            }
+        };
+
+        test_println!("-> try_clear_storage; marked!");
+
+        if should_clear {
+            // We're allowed to remove the slot now!
+            test_println!("-> try_remove_value; can clear now");
+            return self.clear_storage(gen, offset, free);
         }
 
-        // Otherwise, we can remove the slot now!
-        test_println!("-> try_clear_storage; can remove now");
-        self.clear_storage(gen, offset, free)
+        true
     }
 
     /// Clear this slot's storage

@@ -388,9 +388,9 @@ where
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.mark_clear_local(self.key);
+                self.shard.clear_local(self.key);
             } else {
-                self.shard.mark_clear_remote(self.key);
+                self.shard.clear_remote(self.key);
             }
         }
     }
@@ -530,9 +530,9 @@ where
         if should_clear {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.mark_clear_local(self.key);
+                self.shard.clear_local(self.key);
             } else {
-                self.shard.mark_clear_remote(self.key);
+                self.shard.clear_remote(self.key);
             }
         }
     }

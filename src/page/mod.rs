@@ -233,8 +233,7 @@ where
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
-                slot.try_remove_value(gen, offset, free_list);
-                true
+                slot.try_remove_value(gen, offset, free_list)
             } else {
                 false
             }
@@ -322,6 +321,26 @@ where
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
                 slot.try_clear_storage(gen, offset, free_list)
+            } else {
+                false
+            }
+        })
+    }
+
+    pub(crate) fn clear<F: FreeList<C>>(
+        &self,
+        addr: Addr<C>,
+        gen: slot::Generation<C>,
+        free_list: &F,
+    ) -> bool {
+        let offset = addr.offset() - self.prev_sz;
+
+        test_println!("-> offset {:?}", offset);
+
+        self.slab.with(|slab| {
+            let slab = unsafe { &*slab }.as_ref();
+            if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
+                slot.clear_storage(gen, offset, free_list)
             } else {
                 false
             }
