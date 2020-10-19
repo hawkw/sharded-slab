@@ -241,6 +241,7 @@ mod shard;
 use cfg::CfgPrivate;
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
+#[doc(inline)]
 pub use pool::Pool;
 use std::ptr;
 
