@@ -39,17 +39,30 @@ use std::{fmt, marker::PhantomData};
 /// # use sharded_slab::Pool;
 /// let pool: Pool<String> = Pool::new();
 ///
-/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
 /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
 /// ```
 ///
-/// Pool entries can be cleared either by manually calling [`Pool::clear`]. This marks the entry to
+/// Create a new pooled item, returning a guard that allows mutable access:
+/// ```
+/// # use sharded_slab::Pool;
+/// let pool: Pool<String> = Pool::new();
+///
+/// let mut guard = pool.create().unwrap();
+/// let key = guard.key();
+/// guard.push_str("hello world");
+///
+/// drop(guard); // release the guard, allowing immutable access.
+/// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// ```
+///
+/// Pool entries can be cleared by calling [`Pool::clear`]. This marks the entry to
 /// be cleared when the guards referencing to it are dropped.
 /// ```
 /// # use sharded_slab::Pool;
 /// let pool: Pool<String> = Pool::new();
 ///
-/// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
 ///
 /// // Mark this entry to be cleared.
 /// pool.clear(key);
@@ -158,11 +171,12 @@ where
     /// # Examples
     /// ```rust
     /// # use sharded_slab::Pool;
+    /// # use std::thread;
     /// let pool: Pool<String> = Pool::new();
     ///
     /// // Create a new pooled item, returning a guard that allows mutable
     /// // access to the new item.
-    /// let item = pool.create().unwrap();
+    /// let mut item = pool.create().unwrap();
     /// // Return a key that allows indexing the created item once the guard
     /// // has been dropped.
     /// let key = item.key();
@@ -170,7 +184,7 @@ where
     /// // Mutate the item.
     /// item.push_str("Hello");
     /// // Drop the guard, releasing mutable access to the new item.
-    /// drop(guard);
+    /// drop(item);
     ///
     /// /// Other threads may now (immutably) access the item using the returned key.
     /// thread::spawn(move || {
@@ -203,10 +217,11 @@ where
     /// # Examples
     /// ```rust
     /// # use sharded_slab::Pool;
+    /// # use std::thread;
     /// let pool: Pool<String> = Pool::new();
     ///
     /// // Create a new pooled item, returning its integer key.
-    /// let item = pool.create_with(|s| s.push_str("Hello")).unwrap();
+    /// let key = pool.create_with(|s| s.push_str("Hello")).unwrap();
     ///
     /// /// Other threads may now (immutably) access the item using the key.
     /// thread::spawn(move || {
@@ -227,8 +242,8 @@ where
     /// # Examples
     ///
     /// ```rust
-    /// # use sharded_slab::Pool;Ref
-    /// let pool: Pool<String> = sharded_slab::Pool::new();
+    /// # use sharded_slab::Pool;
+    /// let pool: Pool<String> = Pool::new();
     /// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
@@ -255,7 +270,12 @@ where
     /// ```rust
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
-    /// let key = pool.create(|item| item.push_str("hello world")).unwrap();
+    ///
+    /// // Check out an item from the pool.
+    /// let mut item = pool.create().unwrap();
+    /// let key = item.key();
+    /// item.push_str("hello world");
+    /// drop(item);
     ///
     /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
     ///
@@ -267,7 +287,7 @@ where
     /// # use sharded_slab::Pool;
     /// let pool: Pool<String> = Pool::new();
     ///
-    /// let key = pool.create(|item| item.push_str("Hello world!")).unwrap();
+    /// let key = pool.create_with(|item| item.push_str("Hello world!")).unwrap();
     ///
     /// // Clearing a key that doesn't exist in the `Pool` will return `false`
     /// assert_eq!(pool.clear(key + 69420), false);
@@ -415,8 +435,8 @@ where
     ///
     /// ```
     /// # use sharded_slab::Pool;
-    /// # use std::thread;
-    /// let pool: Pool<String> = Pool::new();
+    /// # use std::{sync::Arc, thread};
+    /// let pool = Arc::new(Pool::<String>::new());
     ///
     /// let mut guard_mut = pool.create().unwrap();
     /// let key = guard_mut.key();
@@ -437,11 +457,11 @@ where
     /// thread::spawn(move || {
     ///     let guard = pool2.get(key)
     ///         .expect("the item may now be referenced by other threads");
-    ///     assert_eq!(pool.get(key), String::from("Hello"));
+    ///     assert_eq!(guard, String::from("Hello"));
     /// }).join().unwrap();
     ///
     /// // We can still access the value immutably through the downgraded guard.
-    /// assert_eq!(guard, String::from("hello"));
+    /// assert_eq!(guard, String::from("Hello"));
     /// ```
     pub fn downgrade(mut self) -> Ref<'a, T, C> {
         unsafe {
