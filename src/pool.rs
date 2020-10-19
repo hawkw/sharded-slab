@@ -74,6 +74,7 @@ impl<T> Pool<T>
 where
     T: Clear + Default,
 {
+    /// Returns a new `Pool` with the default configuration parameters.
     pub fn new() -> Self {
         Self::new_with_config()
     }
