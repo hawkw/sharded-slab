@@ -549,3 +549,65 @@ mod free_list_reuse {
         });
     }
 }
+
+#[test]
+fn vacant_entry() {
+    run_model("vacant_entry", || {
+        let slab = Arc::new(Slab::new());
+        let entry = slab.vacant_entry().unwrap();
+        let key: usize = entry.key();
+
+        let slab2 = slab.clone();
+        let t1 = thread::spawn(move || {
+            test_dbg!(slab2.get(key));
+        });
+
+        entry.insert("hello world");
+        t1.join().unwrap();
+
+        assert_eq!(slab.get(key).expect("get"), "hello world");
+    });
+}
+
+#[test]
+fn vacant_entry_2() {
+    run_model("vacant_entry_2", || {
+        let slab = Arc::new(Slab::new());
+        let entry = slab.vacant_entry().unwrap();
+        let key: usize = entry.key();
+
+        let slab2 = slab.clone();
+        let slab3 = slab.clone();
+        let t1 = thread::spawn(move || {
+            test_dbg!(slab2.get(key));
+        });
+
+        entry.insert("hello world");
+        let t2 = thread::spawn(move || {
+            test_dbg!(slab3.get(key));
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+        assert_eq!(slab.get(key).expect("get"), "hello world");
+    });
+}
+
+#[test]
+fn vacant_entry_remove() {
+    run_model("vacant_entry_remove", || {
+        let slab = Arc::new(Slab::new());
+        let entry = slab.vacant_entry().unwrap();
+        let key: usize = entry.key();
+
+        let slab2 = slab.clone();
+        let t1 = thread::spawn(move || {
+            assert!(!slab2.remove(key));
+        });
+
+        t1.join().unwrap();
+
+        entry.insert("hello world");
+        assert_eq!(slab.get(key).expect("get"), "hello world");
+    });
+}

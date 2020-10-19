@@ -268,6 +268,35 @@ pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
+/// A handle to a vacant entry in a `Slab`.
+///
+/// `VacantEntry` allows constructing values with the key that they will be
+/// assigned to.
+///
+/// # Examples
+///
+/// ```
+/// # use sharded_slab::Slab;
+/// let mut slab = Slab::new();
+///
+/// let hello = {
+///     let entry = slab.vacant_entry().unwrap();
+///     let key = entry.key();
+///
+///     entry.insert((key, "hello"));
+///     key
+/// };
+///
+/// assert_eq!(hello, slab.get(hello).unwrap().0);
+/// assert_eq!("hello", slab.get(hello).unwrap().1);
+/// ```
+#[derive(Debug)]
+pub struct VacantEntry<'a, T, C: cfg::Config = DefaultConfig> {
+    inner: page::slot::InitGuard<Option<T>, C>,
+    key: usize,
+    _lt: PhantomData<&'a ()>,
+}
+
 impl<T> Slab<T> {
     /// Returns a new slab with the default configuration parameters.
     pub fn new() -> Self {
@@ -325,6 +354,43 @@ impl<T, C: cfg::Config> Slab<T, C> {
                 Some(gen.pack(idx))
             })
             .map(|idx| tid.pack(idx))
+    }
+
+    /// Return a handle to a vacant entry allowing for further manipulation.
+    ///
+    /// This function is useful when creating values that must contain their
+    /// slab key. The returned `VacantEntry` reserves a slot in the slab and is
+    /// able to query the associated key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sharded_slab::Slab;
+    /// let mut slab = Slab::new();
+    ///
+    /// let hello = {
+    ///     let entry = slab.vacant_entry().unwrap();
+    ///     let key = entry.key();
+    ///
+    ///     entry.insert((key, "hello"));
+    ///     key
+    /// };
+    ///
+    /// assert_eq!(hello, slab.get(hello).unwrap().0);
+    /// assert_eq!("hello", slab.get(hello).unwrap().1);
+    /// ```
+    pub fn vacant_entry(&self) -> Option<VacantEntry<'_, T, C>> {
+        let (tid, shard) = self.shards.current();
+        test_println!("vacant_entry {:?}", tid);
+        shard.init_with(|idx, slot| {
+            let inner = slot.init()?;
+            let key = inner.generation().pack(tid.pack(idx));
+            Some(VacantEntry {
+                inner,
+                key,
+                _lt: PhantomData,
+            })
+        })
     }
 
     /// Remove the value associated with the given key from the slab, returning
@@ -588,6 +654,80 @@ where
 {
     fn eq(&self, other: &T) -> bool {
         self.value().eq(other)
+    }
+}
+
+// === impl VacantEntry ===
+
+impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
+    /// Insert a value in the entry.
+    ///
+    /// To get the key associated with the value, use `key` prior to calling
+    /// `insert`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sharded_slab::Slab;
+    /// let mut slab = Slab::new();
+    ///
+    /// let hello = {
+    ///     let entry = slab.vacant_entry().unwrap();
+    ///     let key = entry.key();
+    ///
+    ///     entry.insert((key, "hello"));
+    ///     key
+    /// };
+    ///
+    /// assert_eq!(hello, slab.get(hello).unwrap().0);
+    /// assert_eq!("hello", slab.get(hello).unwrap().1);
+    /// ```
+    pub fn insert(mut self, val: T) {
+        let value = unsafe {
+            // Safety: this `VacantEntry` only lives as long as the `Slab` it was
+            // borrowed from, so it cannot outlive the entry's slot.
+            self.inner.value_mut()
+        };
+        debug_assert!(
+            value.is_none(),
+            "tried to insert to a slot that already had a value!"
+        );
+        *value = Some(val);
+        let _released = unsafe {
+            // Safety: again, this `VacantEntry` only lives as long as the
+            // `Slab` it was borrowed from, so it cannot outlive the entry's
+            // slot.
+            self.inner.release()
+        };
+        debug_assert!(
+            !_released,
+            "removing a value before it was inserted should be a no-op"
+        )
+    }
+
+    /// Return the key associated with this entry.
+    ///
+    /// A value stored in this entry will be associated with this key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sharded_slab::*;
+    /// let mut slab = Slab::new();
+    ///
+    /// let hello = {
+    ///     let entry = slab.vacant_entry().unwrap();
+    ///     let key = entry.key();
+    ///
+    ///     entry.insert((key, "hello"));
+    ///     key
+    /// };
+    ///
+    /// assert_eq!(hello, slab.get(hello).unwrap().0);
+    /// assert_eq!("hello", slab.get(hello).unwrap().1);
+    /// ```
+    pub fn key(&self) -> usize {
+        self.key
     }
 }
 
