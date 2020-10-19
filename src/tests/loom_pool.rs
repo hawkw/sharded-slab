@@ -205,3 +205,99 @@ fn create_mut_guard_prevents_access() {
         .unwrap();
     });
 }
+
+#[test]
+fn create_mut_guard() {
+    run_model("create_mut_guard", || {
+        let pool = Arc::new(Pool::<String>::new());
+        let mut guard = pool.create().unwrap();
+        let key: usize = guard.key();
+
+        let pool2 = pool.clone();
+        let t1 = thread::spawn(move || {
+            dbg!(pool2.get(key));
+        });
+
+        guard.push_str("Hello world");
+        drop(guard);
+
+        t1.join().unwrap();
+    });
+}
+
+#[test]
+fn create_mut_guard_2() {
+    run_model("create_mut_guard_2", || {
+        let pool = Arc::new(Pool::<String>::new());
+        let mut guard = pool.create().unwrap();
+        let key: usize = guard.key();
+
+        let pool2 = pool.clone();
+        let pool3 = pool.clone();
+        let t1 = thread::spawn(move || {
+            dbg!(pool2.get(key));
+        });
+
+        guard.push_str("Hello world");
+        let t2 = thread::spawn(move || {
+            dbg!(pool3.get(key));
+        });
+        drop(guard);
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+    });
+}
+
+#[test]
+fn create_mut_guard_downgrade() {
+    run_model("create_mut_guard_downgrade", || {
+        let pool = Arc::new(Pool::<String>::new());
+        let mut guard = pool.create().unwrap();
+        let key: usize = guard.key();
+
+        let pool2 = pool.clone();
+        let pool3 = pool.clone();
+        let t1 = thread::spawn(move || {
+            dbg!(pool2.get(key));
+        });
+
+        guard.push_str("Hello world");
+        let guard = guard.downgrade();
+        let t2 = thread::spawn(move || {
+            dbg!(pool3.get(key));
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+        assert_eq!(guard, "Hello world".to_owned());
+    });
+}
+
+#[test]
+fn create_mut_guard_downgrade_clear() {
+    run_model("create_mut_guard_downgrade_clear", || {
+        let pool = Arc::new(Pool::<String>::new());
+        let mut guard = pool.create().unwrap();
+        let key: usize = guard.key();
+
+        let pool2 = pool.clone();
+
+        guard.push_str("Hello world");
+        let guard = guard.downgrade();
+        let pool3 = pool.clone();
+        let t1 = thread::spawn(move || {
+            dbg!(pool2.get(key));
+        });
+        let t2 = thread::spawn(move || {
+            dbg!(pool3.clear(key));
+        });
+
+        assert_eq!(guard, "Hello world".to_owned());
+        drop(guard);
+        assert!(pool.get(key).is_none());
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+    });
+}
