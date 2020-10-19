@@ -4,7 +4,7 @@ use crate::sync::{
     UnsafeCell,
 };
 use crate::{cfg, clear::Clear, Pack, Tid};
-use std::{fmt, marker::PhantomData, mem, ptr};
+use std::{fmt, marker::PhantomData, mem, ptr, thread};
 
 pub(crate) struct Slot<T, C> {
     lifecycle: AtomicUsize,
@@ -29,6 +29,7 @@ pub(crate) struct GuardMut<'a, T, C: cfg::Config = cfg::DefaultConfig> {
 pub(crate) struct InitGuard<T, C: cfg::Config = cfg::DefaultConfig> {
     slot: ptr::NonNull<Slot<T, C>>,
     curr_lifecycle: usize,
+    released: bool,
 }
 
 #[repr(transparent)]
@@ -108,11 +109,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get<'a>(
-        &'a self,
-        gen: Generation<C>,
-        // f: impl FnOnce(&'a T) -> &'a U,
-    ) -> Option<Guard<'a, T, C>> {
+    pub(crate) fn get<'a>(&'a self, gen: Generation<C>) -> Option<Guard<'a, T, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -324,6 +321,7 @@ where
         Some(InitGuard {
             slot: ptr::NonNull::from(self),
             curr_lifecycle: lifecycle,
+            released: false,
         })
     }
 }
@@ -563,12 +561,6 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     }
 }
 
-// impl<'a, T, C: cfg::Config> Guard<'a, &'a mut T, C> {
-//     pub(crate) fn item_mut(&mut self) -> &mut T {
-//         self.item
-//     }
-// }
-
 // === impl Lifecycle ===
 
 impl<C: cfg::Config> Lifecycle<C> {
@@ -720,25 +712,75 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
     pub(crate) unsafe fn value_mut(&mut self) -> &mut T {
         self.slot.as_ref().item.with_mut(|val| &mut *val)
     }
-}
 
-impl<T, C: cfg::Config> Drop for InitGuard<T, C> {
-    fn drop(&mut self) {
-        test_println!("InitGuard::drop; gen={:?}", self.generation());
+    pub(crate) unsafe fn release(&mut self) -> bool {
+        test_println!(
+            "InitGuard::release; curr_lifecycle={:?};",
+            Lifecycle::<C>::from_packed(self.curr_lifecycle)
+        );
+        if self.released {
+            test_println!("-> already released!");
+            return false;
+        }
+        self.released = true;
+        let mut curr_lifecycle = self.curr_lifecycle;
+        let slot = self.slot.as_ref();
         let new_lifecycle = LifecycleGen::<C>::from_packed(self.curr_lifecycle)
             .pack(Lifecycle::<C>::PRESENT.pack(0));
-        let _res = unsafe { self.slot.as_ref() }.lifecycle.compare_exchange(
-            self.curr_lifecycle,
+
+        match slot.lifecycle.compare_exchange(
+            curr_lifecycle,
             new_lifecycle,
             Ordering::AcqRel,
             Ordering::Acquire,
-        );
-        test_println!("-> finished init: {:?}", _res);
-        debug_assert!(
-            _res.is_ok() || std::thread::panicking(),
-            "lifecycle changed under us! {:#b}",
-            _res.unwrap_err()
-        );
+        ) {
+            Ok(_) => {
+                test_println!("--> advanced to PRESENT; done");
+                return false;
+            }
+            Err(actual) => {
+                test_println!(
+                    "--> lifecycle changed; actual={:?}",
+                    Lifecycle::<C>::from_packed(actual)
+                );
+                curr_lifecycle = actual;
+            }
+        }
+
+        // if the state was no longer the prior state, we are now responsible
+        // for releasing the slot.
+        loop {
+            let refs = RefCount::<C>::from_packed(curr_lifecycle);
+            let state = Lifecycle::<C>::from_packed(curr_lifecycle).state;
+
+            test_println!(
+                "-> InitGuard::release; lifecycle={:#x}; state={:?}; refs={:?};",
+                curr_lifecycle,
+                state,
+                refs,
+            );
+
+            debug_assert!(state == State::Marked || thread::panicking(), "state was not MARKED; someone else has removed the slot while we have exclusive access!\nactual={:?}", state);
+            debug_assert!(refs.value == 0 || thread::panicking(), "ref count was not 0; someone else has referenced the slot while we have exclusive access!\nactual={:?}", refs);
+            let new_lifecycle = self.generation().pack(State::Removing as usize);
+
+            match slot.lifecycle.compare_exchange(
+                curr_lifecycle,
+                new_lifecycle,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    test_println!("-> InitGuard::RELEASE: done!");
+                    return true;
+                }
+                Err(actual) => {
+                    debug_assert!(thread::panicking(), "we should not have to retry this CAS!");
+                    test_println!("-> InitGuard::release; retry, actual={:#x}", actual);
+                    curr_lifecycle = actual;
+                }
+            }
+        }
     }
 }
 

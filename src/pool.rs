@@ -2,6 +2,7 @@ use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
     page, shard,
+    sync::atomic,
     tid::Tid,
     Pack, Shard,
 };
@@ -334,8 +335,7 @@ where
     C: cfg::Config,
 {
     fn drop(&mut self) {
-        use crate::sync::atomic;
-        test_println!(" -> drop Entry: clearing data");
+        test_println!("-> drop Entry: try clearing data");
         if self.inner.release() {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
@@ -381,13 +381,19 @@ where
 
     /// Downgrades the mutable guard to an immutable guard, allowing access to
     /// the pooled value from other threads.
-    pub fn downgrade(self) -> Entry<'a, T, C> {
-        let Self { inner, shard, key } = self;
-        drop(inner);
-        let inner = shard
-            .with_slot(key, |slot| slot.get(C::unpack_gen(key)))
+    pub fn downgrade(mut self) -> Entry<'a, T, C> {
+        unsafe {
+            self.inner.release();
+        }
+        let inner = self
+            .shard
+            .with_slot(self.key, |slot| slot.get(C::unpack_gen(self.key)))
             .expect("generation advanced before a value was released?");
-        Entry { inner, shard, key }
+        Entry {
+            inner,
+            shard: self.shard,
+            key: self.key,
+        }
     }
 
     #[inline]
@@ -423,6 +429,29 @@ where
             // Safety: we are holding a reference to the shard which keeps the
             // pointed slot alive. The returned reference will not outlive `self`.
             self.inner.value_mut()
+        }
+    }
+}
+
+impl<'a, T, C> Drop for EntryMut<'a, T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        test_println!(" -> drop EntryMut: try clearing data");
+        let should_clear = unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive `self`.
+            self.inner.release()
+        };
+        if should_clear {
+            atomic::fence(atomic::Ordering::Acquire);
+            if Tid::<C>::current().as_usize() == self.shard.tid {
+                self.shard.mark_clear_local(self.key);
+            } else {
+                self.shard.mark_clear_remote(self.key);
+            }
         }
     }
 }

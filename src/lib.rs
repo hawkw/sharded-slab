@@ -215,6 +215,19 @@ macro_rules! test_println {
         }
     }
 }
+
+#[cfg(test)]
+macro_rules! test_dbg {
+    ($e:expr) => {
+        match $e {
+            e => {
+                test_println!("{} = {:?}", stringify!($e), &e);
+                e
+            }
+        }
+    };
+}
+
 mod clear;
 pub mod implementation;
 mod page;
