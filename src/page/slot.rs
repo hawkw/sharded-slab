@@ -351,6 +351,7 @@ where
             // pointed slot is alive because we have a reference to it in scope,
             // and the `InitGuard` will be dropped when this function returns.
             mem::swap(guard.value_mut(), value);
+            guard.release();
         };
         test_println!("-> inserted at {:?}", gen);
 
