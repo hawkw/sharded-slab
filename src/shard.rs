@@ -55,8 +55,10 @@ pub(crate) struct Array<T, C: cfg::Config> {
     max: AtomicUsize,
 }
 
+#[derive(Debug)]
 struct Ptr<T, C: cfg::Config>(AtomicPtr<alloc::Track<Shard<T, C>>>);
 
+#[derive(Debug)]
 pub(crate) struct IterMut<'a, T: 'a, C: cfg::Config + 'a>(slice::IterMut<'a, Ptr<T, C>>);
 
 // === impl Shard ===
