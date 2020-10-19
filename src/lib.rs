@@ -256,12 +256,12 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
     _cfg: PhantomData<C>,
 }
 
-/// A guard that allows access to an object in a slab.
+/// A handle that allows access to an object in a slab.
 ///
 /// While the guard exists, it indicates to the slab that the item the guard
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
-pub struct Guard<'a, T, C: cfg::Config = DefaultConfig> {
+pub struct Entry<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<'a, Option<T>, C>,
     value: ptr::NonNull<T>,
     shard: &'a Shard<Option<T>, C>,
@@ -437,7 +437,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     /// [`take`]: #method.take
     pub fn remove(&self, idx: usize) -> bool {
-        // The `Drop` impl for `Guard` calls `remove_local` or `remove_remote` based
+        // The `Drop` impl for `Entry` calls `remove_local` or `remove_remote` based
         // on where the guard was dropped from. If the dropped guard was the last one, this will
         // call `Slot::remove_value` which actually clears storage.
         let tid = C::unpack_tid(idx);
@@ -532,14 +532,14 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// assert_eq!(slab.get(key).unwrap(), "hello world");
     /// assert!(slab.get(12345).is_none());
     /// ```
-    pub fn get(&self, key: usize) -> Option<Guard<'_, T, C>> {
+    pub fn get(&self, key: usize) -> Option<Entry<'_, T, C>> {
         let tid = C::unpack_tid(key);
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
         let value = ptr::NonNull::from(inner.slot().value().as_ref().unwrap());
-        Some(Guard {
+        Some(Entry {
             inner,
             value,
             shard,
@@ -596,9 +596,9 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Slab<T, C> {
 unsafe impl<T: Send, C: cfg::Config> Send for Slab<T, C> {}
 unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
-// === impl Guard ===
+// === impl Entry ===
 
-impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Entry<'a, T, C> {
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
         self.key
@@ -615,7 +615,7 @@ impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> std::ops::Deref for Entry<'a, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -623,7 +623,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
+impl<'a, T, C: cfg::Config> Drop for Entry<'a, T, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
         if self.inner.release() {
@@ -637,7 +637,7 @@ impl<'a, T, C: cfg::Config> Drop for Guard<'a, T, C> {
     }
 }
 
-impl<'a, T, C> fmt::Debug for Guard<'a, T, C>
+impl<'a, T, C> fmt::Debug for Entry<'a, T, C>
 where
     T: fmt::Debug,
     C: cfg::Config,
@@ -647,7 +647,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for Guard<'a, T, C>
+impl<'a, T, C> PartialEq<T> for Entry<'a, T, C>
 where
     T: PartialEq<T>,
     C: cfg::Config,
