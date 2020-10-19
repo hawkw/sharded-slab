@@ -132,6 +132,7 @@ pub(crate) const fn next_pow2(n: usize) -> usize {
 }
 
 // === impl DefaultConfig ===
+
 impl Config for DefaultConfig {
     const INITIAL_PAGE_SIZE: usize = 32;
 
@@ -144,9 +145,15 @@ impl Config for DefaultConfig {
     const MAX_PAGES: usize = WIDTH / 2;
 }
 
+impl fmt::Debug for DefaultConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Self::debug().fmt(f)
+    }
+}
+
 impl<C: Config> fmt::Debug for DebugConfig<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Config")
+        f.debug_struct(std::any::type_name::<C>())
             .field("initial_page_size", &C::INITIAL_SZ)
             .field("max_shards", &C::MAX_SHARDS)
             .field("max_pages", &C::MAX_PAGES)

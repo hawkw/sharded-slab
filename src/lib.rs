@@ -200,6 +200,7 @@
 //! and implementation.
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.0.3")]
+#![warn(missing_debug_implementations, missing_docs, missing_doc_code_examples)]
 
 macro_rules! test_println {
     ($($arg:tt)*) => {
