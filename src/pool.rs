@@ -122,7 +122,7 @@ where
     key: usize,
 }
 
-/// An owned guard that allows access to an object in a pool.
+/// An owned guard that allows shared immutable access to an object in a pool.
 ///
 /// While the guard exists, it indicates to the pool that the item the guard references is
 /// currently being accessed. If the item is removed from the pool while the guard exists, the
@@ -214,6 +214,170 @@ where
     key: usize,
 }
 
+/// An owned guard that allows exclusive, mutable access to an object in a pool.
+///
+/// An `OwnedRefMut<T>` functions more or less identically to an owned
+/// `Box<T>`: it can be passed to functions, stored in structure fields, and
+/// borrowed mutably or immutably, and can be owned for arbitrary lifetimes.
+/// The difference is that, unlike a `Box<T>`, the memory allocation for the
+/// `T` lives in the `Pool`; when an `OwnedRefMut` is created, it may reuse
+/// memory that was allocated for a previous pooled object that has been
+/// cleared. Additionally, the `OwnedRefMut` may be [downgraded] to an
+/// [`OwnedRef`] which may be shared freely, essentially turning the `Box`
+/// into an `Arc`.
+///
+/// This is returned by [`Pool::create_owned`].
+///
+/// While the guard exists, it indicates to the pool that the item the guard
+/// references is currently being accessed. If the item is removed from the pool
+/// while the guard exists, theremoval will be deferred until all guards are
+/// dropped.
+///
+/// Unlike [`RefMut`], which borrows the pool, an `OwnedRefMut` clones the `Arc`
+/// around the pool. Therefore, it keeps the pool from being dropped until all
+/// such guards have been dropped. This means that an `OwnedRefMut` may be held for
+/// an arbitrary lifetime.
+///
+/// # Examples
+///
+/// ```rust
+/// # use sharded_slab::Pool;
+/// # use std::thread;
+/// use std::sync::Arc;
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+///
+/// // Create a new pooled item, returning an owned guard that allows mutable
+/// // access to the new item.
+/// let mut item = pool.clone().create_owned().unwrap();
+/// // Return a key that allows indexing the created item once the guard
+/// // has been dropped.
+/// let key = item.key();
+///
+/// // Mutate the item.
+/// item.push_str("Hello");
+/// // Drop the guard, releasing mutable access to the new item.
+/// drop(item);
+///
+/// /// Other threads may now (immutably) access the item using the returned key.
+/// thread::spawn(move || {
+///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+/// }).join().unwrap();
+/// ```
+///
+/// ```rust
+/// # use sharded_slab::Pool;
+/// use std::sync::Arc;
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+///
+/// // Create a new item, returning an owned, mutable guard.
+/// let mut value = pool.clone().create_owned().unwrap();
+///
+/// // Now, the original `Arc` clone of the pool may be dropped, but the
+/// // returned `OwnedRefMut` can still access the value.
+/// drop(pool);
+///
+/// value.push_str("hello world");
+/// assert_eq!(value, String::from("hello world"));
+/// ```
+///
+/// Unlike [`RefMut`], an `OwnedRefMut` may be stored in a struct which must live
+/// for the `'static` lifetime:
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use sharded_slab::pool::OwnedRefMut;
+/// use std::sync::Arc;
+///
+/// pub struct MyStruct {
+///     pool_ref: OwnedRefMut<String>,
+///     // ... other fields ...
+/// }
+///
+/// // Suppose this is some arbitrary function which requires a value that
+/// // lives for the 'static lifetime...
+/// fn function_requiring_static<T: 'static>(t: &T) {
+///     // ... do something extremely important and interesting ...
+/// }
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+///
+/// // Create a new item, returning a mutable owned reference.
+/// let pool_ref = pool.clone().create_owned().unwrap();
+///
+/// let my_struct = MyStruct {
+///     pool_ref,
+///     // ...
+/// };
+///
+/// // We can use `my_struct` anywhere where it is required to have the
+/// // `'static` lifetime:
+/// function_requiring_static(&my_struct);
+/// ```
+///
+/// `OwnedRefMut`s may be sent between threads:
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use std::{thread, sync::Arc};
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+///
+/// let mut value = pool.clone().create_owned().unwrap();
+/// let key = value.key();
+///
+/// thread::spawn(move || {
+///     value.push_str("hello world");
+///     // ...
+/// }).join().unwrap();
+///
+/// // Once the `OwnedRefMut` has been dropped by the other thread, we may
+/// // now access the value immutably on this thread.
+///
+/// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// ```
+///
+/// Downgrading from a mutable to an immutable reference:
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use std::{thread, sync::Arc};
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+///
+/// let mut value = pool.clone().create_owned().unwrap();
+/// let key = value.key();
+/// value.push_str("hello world");
+///
+/// // Downgrade the mutable owned ref to an immutable owned ref.
+/// let value = value.downgrade();
+///
+/// // Once the `OwnedRefMut` has been downgraded, other threads may
+/// // immutably access the pooled value:
+/// thread::spawn(move || {
+///     assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+/// }).join().unwrap();
+///
+/// // This thread can still access the pooled value through the
+/// // immutable owned ref:
+/// assert_eq!(value, String::from("hello world"));
+/// ```
+///
+/// [`Pool::create_owned`]: crate::Pool::create_owned
+/// [`RefMut`]: crate::pool::RefMut
+/// [`OwnedRefMut`]: crate::pool::OwnedRefMut
+/// [downgraded]: crate::pool::OwnedRefMut::downgrade
+pub struct OwnedRefMut<T, C = DefaultConfig>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    inner: page::slot::InitGuard<T, C>,
+    pool: Arc<Pool<T, C>>,
+    key: usize,
+}
+
 impl<T> Pool<T>
 where
     T: Clear + Default,
@@ -296,6 +460,174 @@ where
             inner,
             key: tid.pack(key),
             shard,
+        })
+    }
+
+    /// Creates a new object in the pool, returning an [`OwnedRefMut`] guard that
+    /// may be used to mutate the new object.
+    ///
+    /// If this function returns `None`, then the shard for the current thread
+    /// is full and no items can be added until some are removed, or the maximum
+    /// number of shards has been reached.
+    ///
+    /// Unlike [`create`], which borrows the pool, this method _clones_ the `Arc`
+    /// around the pool if a value exists for the given key. This means that the
+    /// returned [`OwnedRefMut`] can be held for an arbitrary lifetime. However,
+    /// this method requires that the pool itself be wrapped in an `Arc`.
+    ///
+    /// An `OwnedRefMut<T>` functions more or less identically to an owned
+    /// `Box<T>`: it can be passed to functions, stored in structure fields, and
+    /// borrowed mutably or immutably, and can be owned for arbitrary lifetimes.
+    /// The difference is that, unlike a `Box<T>`, the memory allocation for the
+    /// `T` lives in the `Pool`; when an `OwnedRefMut` is created, it may reuse
+    /// memory that was allocated for a previous pooled object that has been
+    /// cleared. Additionally, the `OwnedRefMut` may be [downgraded] to an
+    /// [`OwnedRef`] which may be shared freely, essentially turning the `Box`
+    /// into an `Arc`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// # use std::thread;
+    /// use std::sync::Arc;
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    ///
+    /// // Create a new pooled item, returning an owned guard that allows mutable
+    /// // access to the new item.
+    /// let mut item = pool.clone().create_owned().unwrap();
+    /// // Return a key that allows indexing the created item once the guard
+    /// // has been dropped.
+    /// let key = item.key();
+    ///
+    /// // Mutate the item.
+    /// item.push_str("Hello");
+    /// // Drop the guard, releasing mutable access to the new item.
+    /// drop(item);
+    ///
+    /// /// Other threads may now (immutably) access the item using the returned key.
+    /// thread::spawn(move || {
+    ///    assert_eq!(pool.get(key).unwrap(), String::from("Hello"));
+    /// }).join().unwrap();
+    /// ```
+    ///
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// use std::sync::Arc;
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    ///
+    /// // Create a new item, returning an owned, mutable guard.
+    /// let mut value = pool.clone().create_owned().unwrap();
+    ///
+    /// // Now, the original `Arc` clone of the pool may be dropped, but the
+    /// // returned `OwnedRefMut` can still access the value.
+    /// drop(pool);
+    ///
+    /// value.push_str("hello world");
+    /// assert_eq!(value, String::from("hello world"));
+    /// ```
+    ///
+    /// Unlike [`RefMut`], an `OwnedRefMut` may be stored in a struct which must live
+    /// for the `'static` lifetime:
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// use sharded_slab::pool::OwnedRefMut;
+    /// use std::sync::Arc;
+    ///
+    /// pub struct MyStruct {
+    ///     pool_ref: OwnedRefMut<String>,
+    ///     // ... other fields ...
+    /// }
+    ///
+    /// // Suppose this is some arbitrary function which requires a value that
+    /// // lives for the 'static lifetime...
+    /// fn function_requiring_static<T: 'static>(t: &T) {
+    ///     // ... do something extremely important and interesting ...
+    /// }
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    ///
+    /// // Create a new item, returning a mutable owned reference.
+    /// let pool_ref = pool.clone().create_owned().unwrap();
+    ///
+    /// let my_struct = MyStruct {
+    ///     pool_ref,
+    ///     // ...
+    /// };
+    ///
+    /// // We can use `my_struct` anywhere where it is required to have the
+    /// // `'static` lifetime:
+    /// function_requiring_static(&my_struct);
+    /// ```
+    ///
+    /// `OwnedRefMut`s may be sent between threads:
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// use std::{thread, sync::Arc};
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    ///
+    /// let mut value = pool.clone().create_owned().unwrap();
+    /// let key = value.key();
+    ///
+    /// thread::spawn(move || {
+    ///     value.push_str("hello world");
+    ///     // ...
+    /// }).join().unwrap();
+    ///
+    /// // Once the `OwnedRefMut` has been dropped by the other thread, we may
+    /// // now access the value immutably on this thread.
+    ///
+    /// assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+    /// ```
+    ///
+    /// Downgrading from a mutable to an immutable reference:
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// use std::{thread, sync::Arc};
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    ///
+    /// let mut value = pool.clone().create_owned().unwrap();
+    /// let key = value.key();
+    /// value.push_str("hello world");
+    ///
+    /// // Downgrade the mutable owned ref to an immutable owned ref.
+    /// let value = value.downgrade();
+    ///
+    /// // Once the `OwnedRefMut` has been downgraded, other threads may
+    /// // immutably access the pooled value:
+    /// thread::spawn(move || {
+    ///     assert_eq!(pool.get(key).unwrap(), String::from("hello world"));
+    /// }).join().unwrap();
+    ///
+    /// // This thread can still access the pooled value through the
+    /// // immutable owned ref:
+    /// assert_eq!(value, String::from("hello world"));
+    /// ```
+    ///
+    /// [`create`]: Pool::create
+    /// [`OwnedRef`]: crate::pool::OwnedRef
+    /// [`RefMut`]: crate::pool::RefMut
+    /// [`OwnedRefMut`]: crate::pool::OwnedRefMut
+    /// [downgraded]: crate::pool::OwnedRefMut::downgrade
+    pub fn create_owned(self: Arc<Self>) -> Option<OwnedRefMut<T, C>> {
+        let (tid, shard) = self.shards.current();
+        test_println!("pool: create_owned {:?}", tid);
+        let (inner, key) = shard.init_with(|idx, slot| {
+            let inner = slot.init()?;
+            let gen = inner.generation();
+            Some((inner, tid.pack(gen.pack(idx))))
+        })?;
+        Some(OwnedRefMut {
+            inner,
+            pool: self,
+            key,
         })
     }
 
@@ -637,7 +969,7 @@ where
     /// # use std::{sync::Arc, thread};
     /// let pool = Arc::new(Pool::<String>::new());
     ///
-    /// let mut guard_mut = pool.create().unwrap();
+    /// let mut guard_mut = pool.clone().create_owned().unwrap();
     /// let key = guard_mut.key();
     /// guard_mut.push_str("Hello");
     ///
@@ -663,13 +995,7 @@ where
     /// assert_eq!(guard, String::from("Hello"));
     /// ```
     pub fn downgrade(mut self) -> Ref<'a, T, C> {
-        unsafe {
-            self.inner.release();
-        }
-        let inner = self
-            .shard
-            .with_slot(self.key, |slot| slot.get(C::unpack_gen(self.key)))
-            .expect("generation advanced before a value was released?");
+        let inner = unsafe { self.inner.downgrade() };
         Ref {
             inner,
             shard: self.shard,
@@ -845,6 +1171,171 @@ where
 }
 
 unsafe impl<T, C> Send for OwnedRef<T, C>
+where
+    T: Sync + Clear + Default,
+    C: cfg::Config,
+{
+}
+
+// === impl OwnedRefMut ===
+
+impl<T, C> OwnedRefMut<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Returns the key used to access this guard
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    /// Downgrades the owned mutable guard to an owned immutable guard, allowing
+    /// access to the pooled value from other threads.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// # use std::{sync::Arc, thread};
+    /// let pool = Arc::new(Pool::<String>::new());
+    ///
+    /// let mut guard_mut = pool.clone().create_owned().unwrap();
+    /// let key = guard_mut.key();
+    /// guard_mut.push_str("Hello");
+    ///
+    /// // The pooled string is currently borrowed mutably, so other threads
+    /// // may not access it.
+    /// let pool2 = pool.clone();
+    /// thread::spawn(move || {
+    ///     assert!(pool2.get(key).is_none())
+    /// }).join().unwrap();
+    ///
+    /// // Downgrade the guard to an immutable reference.
+    /// let guard = guard_mut.downgrade();
+    ///
+    /// // Now, other threads may also access the pooled value.
+    /// let pool2 = pool.clone();
+    /// thread::spawn(move || {
+    ///     let guard = pool2.get(key)
+    ///         .expect("the item may now be referenced by other threads");
+    ///     assert_eq!(guard, String::from("Hello"));
+    /// }).join().unwrap();
+    ///
+    /// // We can still access the value immutably through the downgraded guard.
+    /// assert_eq!(guard, String::from("Hello"));
+    /// ```
+    pub fn downgrade(mut self) -> OwnedRef<T, C> {
+        let inner = unsafe { self.inner.downgrade() };
+        OwnedRef {
+            inner,
+            pool: self.pool.clone(),
+            key: self.key,
+        }
+    }
+
+    fn shard(&self) -> Option<&Shard<T, C>> {
+        let shard_idx = Tid::<C>::from_packed(self.key);
+        test_println!("-> shard={:?}", shard_idx);
+        self.pool.shards.get(shard_idx.as_usize())
+    }
+
+    #[inline]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: calling `slot::InitGuard::value` is unsafe, since the `Guard`
+            // value contains a pointer to the slot that may outlive the slab
+            // containing that slot. Here, the `OwnedRefMut` has an `Arc` clone of
+            // the shard containing that slot, which ensures that the slot will
+            // not be dropped while this `Guard` exists.
+            self.inner.value()
+        }
+    }
+}
+
+impl<T, C> std::ops::Deref for OwnedRefMut<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl<T, C> std::ops::DerefMut for OwnedRefMut<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            // Safety: calling `slot::InitGuard::value_mut` is unsafe, since the
+            // `Guard`
+            // value contains a pointer to the slot that may outlive the slab
+            // containing that slot. Here, the `OwnedRefMut` has an `Arc` clone of
+            // the shard containing that slot, which ensures that the slot will
+            // not be dropped while this `Guard` exists.
+            self.inner.value_mut()
+        }
+    }
+}
+
+impl<T, C> Drop for OwnedRefMut<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        test_println!("drop OwnedRefMut: try clearing data");
+        let should_clear = unsafe {
+            // Safety: calling `slot::Guard::release` is unsafe, since the
+            // `Guard` value contains a pointer to the slot that may outlive the
+            // slab containing that slot. Here, the `OwnedRef` owns an `Arc`
+            // clone of the pool, which keeps it alive as long as the `OwnedRef`
+            // exists.
+            self.inner.release()
+        };
+        if should_clear {
+            if let Some(shard) = self.shard() {
+                shard.clear_after_release(self.key);
+            } else {
+                test_println!("-> shard does not exist! THIS IS A BUG");
+                debug_assert!(std::thread::panicking(), "[internal error] tried to drop an `OwnedRefMut` to a slot on a shard that never existed!");
+            }
+        }
+    }
+}
+
+impl<T, C> fmt::Debug for OwnedRefMut<T, C>
+where
+    T: fmt::Debug + Clear + Default,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.value(), f)
+    }
+}
+
+impl<T, C> PartialEq<T> for OwnedRefMut<T, C>
+where
+    T: PartialEq<T> + Clear + Default,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        *self.value() == *other
+    }
+}
+
+unsafe impl<T, C> Sync for OwnedRefMut<T, C>
+where
+    T: Sync + Clear + Default,
+    C: cfg::Config,
+{
+}
+
+unsafe impl<T, C> Send for OwnedRefMut<T, C>
 where
     T: Sync + Clear + Default,
     C: cfg::Config,

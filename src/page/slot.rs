@@ -809,9 +809,27 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
     /// contains the pointed slot. Failure to do so means this pointer may
     /// dangle.
     pub(crate) unsafe fn release(&mut self) -> bool {
+        self.release2(0)
+    }
+
+    /// Downgrades the guard to an immutable guard
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `InitGuard` does not outlive the slab that
+    /// contains the pointed slot. Failure to do so means this pointer may
+    /// dangle.
+    pub(crate) unsafe fn downgrade(&mut self) -> Guard<T, C> {
+        let _ = self.release2(RefCount::<C>::from_usize(1).pack(0));
+        Guard { slot: self.slot }
+    }
+
+    unsafe fn release2(&mut self, new_refs: usize) -> bool {
         test_println!(
-            "InitGuard::release; curr_lifecycle={:?};",
-            Lifecycle::<C>::from_packed(self.curr_lifecycle)
+            "InitGuard::release; curr_lifecycle={:?}; downgrading={}",
+            Lifecycle::<C>::from_packed(self.curr_lifecycle),
+            new_refs != 0,
         );
         if self.released {
             test_println!("-> already released!");
@@ -821,7 +839,7 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
         let mut curr_lifecycle = self.curr_lifecycle;
         let slot = self.slot.as_ref();
         let new_lifecycle = LifecycleGen::<C>::from_packed(self.curr_lifecycle)
-            .pack(Lifecycle::<C>::PRESENT.pack(0));
+            .pack(Lifecycle::<C>::PRESENT.pack(new_refs));
 
         match slot.lifecycle.compare_exchange(
             curr_lifecycle,

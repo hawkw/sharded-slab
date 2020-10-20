@@ -13,7 +13,7 @@ mod inner {
     pub(crate) use loom::thread_local;
 
     pub(crate) mod alloc {
-        #[allow(dead_code)]
+        #![allow(dead_code)]
         use loom::alloc;
         use std::fmt;
         /// Track allocations, detecting leaks

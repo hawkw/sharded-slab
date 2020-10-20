@@ -243,10 +243,8 @@ pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
 #[doc(inline)]
 pub use pool::Pool;
-use std::ptr;
-
-use crate::sync::atomic;
 use shard::Shard;
+use std::ptr;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
 /// A sharded slab.
@@ -930,7 +928,6 @@ impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
         self.key
     }
 }
-
 // === impl OwnedEntry ===
 
 impl<T, C> OwnedEntry<T, C>
