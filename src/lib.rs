@@ -245,8 +245,9 @@ pub use clear::Clear;
 pub use pool::Pool;
 use std::ptr;
 
+use crate::sync::atomic;
 use shard::Shard;
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 /// A sharded slab.
 ///
@@ -295,6 +296,101 @@ pub struct VacantEntry<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::InitGuard<Option<T>, C>,
     key: usize,
     _lt: PhantomData<&'a ()>,
+}
+
+/// An owned guard that allows access to an object in a `S.ab`.
+///
+/// While the guard exists, it indicates to the slab that the item the guard references is
+/// currently being accessed. If the item is removed from the slab while the guard exists, the
+/// removal will be deferred until all guards are dropped.
+///
+/// Unlike [`Entry`], which borrows the slab, an `OwnedEntry` clones the `Arc`
+/// around the slab. Therefore, it keeps the slab from being dropped until all
+/// such guards have been dropped. This means that an `OwnedEntry` may be held for
+/// an arbitrary lifetime.
+///
+/// # Examples
+///
+/// ```
+/// # use sharded_slab::Slab;
+/// use std::sync::Arc;
+///
+/// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+/// let key = slab.insert("hello world").unwrap();
+///
+/// // Look up the created key, returning an `OwnedEntry`.
+/// let value = slab.clone().get_owned(key).unwrap();
+///
+/// // Now, the original `Arc` clone of the slab may be dropped, but the
+/// // returned `OwnedEntry` can still access the value.
+/// assert_eq!(value, "hello world");
+/// ```
+///
+/// Unlike [`Entry`], an `OwnedEntry` may be stored in a struct which must live
+/// for the `'static` lifetime:
+///
+/// ```
+/// # use sharded_slab::Slab;
+/// use sharded_slab::OwnedEntry;
+/// use std::sync::Arc;
+///
+/// pub struct MyStruct {
+///     entry: OwnedEntry<&'static str>,
+///     // ... other fields ...
+/// }
+///
+/// // Suppose this is some arbitrary function which requires a value that
+/// // lives for the 'static lifetime...
+/// fn function_requiring_static<T: 'static>(t: &T) {
+///     // ... do something extremely important and interesting ...
+/// }
+///
+/// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+/// let key = slab.insert("hello world").unwrap();
+///
+/// // Look up the created key, returning an `OwnedEntry`.
+/// let entry = slab.clone().get_owned(key).unwrap();
+/// let my_struct = MyStruct {
+///     entry,
+///     // ...
+/// };
+///
+/// // We can use `my_struct` anywhere where it is required to have the
+/// // `'static` lifetime:
+/// function_requiring_static(&my_struct);
+/// ```
+///
+/// `OwnedEntry`s may be sent between threads:
+///
+/// ```
+/// # use sharded_slab::Slab;
+/// use std::{thread, sync::Arc};
+///
+/// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+/// let key = slab.insert("hello world").unwrap();
+///
+/// // Look up the created key, returning an `OwnedEntry`.
+/// let value = slab.clone().get_owned(key).unwrap();
+///
+/// thread::spawn(move || {
+///     assert_eq!(value, "hello world");
+///     // ...
+/// }).join().unwrap();
+/// ```
+///
+/// [`get`]: Slab::get
+/// [`OwnedEntry`]: crate::OwnedEntry
+/// [`Entry`]: crate::Entry
+///
+/// [`Entry`]: crate::Entry
+pub struct OwnedEntry<T, C = DefaultConfig>
+where
+    C: cfg::Config,
+{
+    inner: page::slot::Guard<Option<T>, C>,
+    value: ptr::NonNull<T>,
+    slab: Arc<Slab<T, C>>,
+    key: usize,
 }
 
 impl<T> Slab<T> {
@@ -549,6 +645,105 @@ impl<T, C: cfg::Config> Slab<T, C> {
         })
     }
 
+    /// Return an owned reference to the value associated with the given key.
+    ///
+    /// If the slab does not contain a value for the given key, `None` is
+    /// returned instead.
+    ///
+    /// Unlike [`get`], which borrows the slab, this method _clones_ the `Arc`
+    /// around the slab. This means that the returned [`OwnedEntry`] can be held
+    /// for an arbitrary lifetime. However,  this method requires that the slab
+    /// itself be wrapped in an `Arc`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sharded_slab::Slab;
+    /// use std::sync::Arc;
+    ///
+    /// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// // Look up the created key, returning an `OwnedEntry`.
+    /// let value = slab.clone().get_owned(key).unwrap();
+    ///
+    /// // Now, the original `Arc` clone of the slab may be dropped, but the
+    /// // returned `OwnedEntry` can still access the value.
+    /// assert_eq!(value, "hello world");
+    /// ```
+    ///
+    /// Unlike [`Entry`], an `OwnedEntry` may be stored in a struct which must live
+    /// for the `'static` lifetime:
+    ///
+    /// ```
+    /// # use sharded_slab::Slab;
+    /// use sharded_slab::OwnedEntry;
+    /// use std::sync::Arc;
+    ///
+    /// pub struct MyStruct {
+    ///     entry: OwnedEntry<&'static str>,
+    ///     // ... other fields ...
+    /// }
+    ///
+    /// // Suppose this is some arbitrary function which requires a value that
+    /// // lives for the 'static lifetime...
+    /// fn function_requiring_static<T: 'static>(t: &T) {
+    ///     // ... do something extremely important and interesting ...
+    /// }
+    ///
+    /// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// // Look up the created key, returning an `OwnedEntry`.
+    /// let entry = slab.clone().get_owned(key).unwrap();
+    /// let my_struct = MyStruct {
+    ///     entry,
+    ///     // ...
+    /// };
+    ///
+    /// // We can use `my_struct` anywhere where it is required to have the
+    /// // `'static` lifetime:
+    /// function_requiring_static(&my_struct);
+    /// ```
+    ///
+    /// `OwnedEntry`s may be sent between threads:
+    ///
+    /// ```
+    /// # use sharded_slab::Slab;
+    /// use std::{thread, sync::Arc};
+    ///
+    /// let slab: Arc<Slab<&'static str>> = Arc::new(Slab::new());
+    /// let key = slab.insert("hello world").unwrap();
+    ///
+    /// // Look up the created key, returning an `OwnedEntry`.
+    /// let value = slab.clone().get_owned(key).unwrap();
+    ///
+    /// thread::spawn(move || {
+    ///     assert_eq!(value, "hello world");
+    ///     // ...
+    /// }).join().unwrap();
+    /// ```
+    ///
+    /// [`get`]: Slab::get
+    /// [`OwnedEntry`]: crate::OwnedEntry
+    /// [`Entry`]: crate::Entry
+    pub fn get_owned(self: Arc<Self>, key: usize) -> Option<OwnedEntry<T, C>> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("get_owned {:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize())?;
+        shard.with_slot(key, |slot| {
+            let inner = slot.get(C::unpack_gen(key))?;
+            let value = ptr::NonNull::from(slot.value().as_ref().unwrap());
+            Some(OwnedEntry {
+                inner,
+                value,
+                slab: self.clone(),
+                key,
+            })
+        })
+    }
+
     /// Returns `true` if the slab contains a value for the given key.
     ///
     /// # Examples
@@ -627,13 +822,13 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for Entry<'a, T, C> {
 
 impl<'a, T, C: cfg::Config> Drop for Entry<'a, T, C> {
     fn drop(&mut self) {
-        use crate::sync::atomic;
         let should_remove = unsafe {
             // Safety: calling `slot::Guard::release` is unsafe, since the
             // `Guard` value contains a pointer to the slot that may outlive the
             // slab containing that slot. Here, the `Entry` guard owns a
             // borrowed reference to the shard containing that slot, which
-            // ensures that the slot will not be dropped while this `Guard` exists.
+            // ensures that the slot will not be dropped while this `Guard`
+            // exists.
             self.inner.release()
         };
         if should_remove {
@@ -739,6 +934,105 @@ impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
     pub fn key(&self) -> usize {
         self.key
     }
+}
+
+// === impl OwnedEntry ===
+
+impl<T, C> OwnedEntry<T, C>
+where
+    C: cfg::Config,
+{
+    /// Returns the key used to access this guard
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    #[inline(always)]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: this is always going to be valid, as it's projected from
+            // the safe reference to `self.value` --- this is just to avoid
+            // having to `expect` an option in the hot path when dereferencing.
+            self.value.as_ref()
+        }
+    }
+}
+
+impl<T, C> std::ops::Deref for OwnedEntry<T, C>
+where
+    C: cfg::Config,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl<T, C> Drop for OwnedEntry<T, C>
+where
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        test_println!("drop OwnedEntry: try clearing data");
+        let should_clear = unsafe {
+            // Safety: calling `slot::Guard::release` is unsafe, since the
+            // `Guard` value contains a pointer to the slot that may outlive the
+            // slab containing that slot. Here, the `OwnedEntry` owns an `Arc`
+            // clone of the pool, which keeps it alive as long as the `OwnedEntry`
+            // exists.
+            self.inner.release()
+        };
+        if should_clear {
+            let shard_idx = Tid::<C>::from_packed(self.key);
+            test_println!("-> shard={:?}", shard_idx);
+            if let Some(shard) = self.slab.shards.get(shard_idx.as_usize()) {
+                atomic::fence(atomic::Ordering::Acquire);
+                if Tid::<C>::current().as_usize() == shard.tid {
+                    shard.take_local(self.key);
+                } else {
+                    shard.take_remote(self.key);
+                }
+            } else {
+                test_println!("-> shard={:?} does not exist! THIS IS A BUG", shard_idx);
+                debug_assert!(std::thread::panicking(), "[internal error] tried to drop an `OwnedEntry` to a slot on a shard that never existed!");
+            }
+        }
+    }
+}
+
+impl<T, C> fmt::Debug for OwnedEntry<T, C>
+where
+    T: fmt::Debug,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.value(), f)
+    }
+}
+
+impl<T, C> PartialEq<T> for OwnedEntry<T, C>
+where
+    T: PartialEq<T>,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        *self.value() == *other
+    }
+}
+
+unsafe impl<T, C> Sync for OwnedEntry<T, C>
+where
+    T: Sync,
+    C: cfg::Config,
+{
+}
+
+unsafe impl<T, C> Send for OwnedEntry<T, C>
+where
+    T: Sync,
+    C: cfg::Config,
+{
 }
 
 // === pack ===
