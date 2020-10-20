@@ -631,7 +631,7 @@ fn owned_entry_send_out_of_local() {
         let item2 = slab.clone().get_owned(key2).expect("get key2");
         let slab2 = slab.clone();
 
-        test_dbg!(slab.clear(key1));
+        test_dbg!(slab.remove(key1));
 
         let t1 = thread::spawn(move || {
             assert_eq!(item1.get_ref(), &String::from("hello"));
@@ -639,7 +639,7 @@ fn owned_entry_send_out_of_local() {
         });
         let t2 = thread::spawn(move || {
             assert_eq!(item2.get_ref(), &String::from("goodbye"));
-            test_dbg!(slab2.clear(key2));
+            test_dbg!(slab2.remove(key2));
             drop(item2);
         });
 
@@ -701,14 +701,14 @@ fn owned_entry_ping_pong() {
 
         let t1 = thread::spawn(move || {
             assert_eq!(item1.get_ref(), &String::from("hello"));
-            slab2.clear(key1);
+            slab2.remove(key1);
             item1
         });
 
         let t2 = thread::spawn(move || {
             let item2 = slab3.clone().get_owned(key2).unwrap();
             assert_eq!(item2.get_ref(), &String::from("world"));
-            slab3.clear(key1);
+            slab3.remove(key1);
             item2
         });
 
@@ -739,11 +739,11 @@ fn owned_entry_drop_from_other_threads() {
             let item2 = slab.clone().get_owned(key2).expect("get key1");
             let t2 = thread::spawn(move || {
                 assert_eq!(item2.get_ref(), &String::from("goodbye"));
-                test_dbg!(slab2.clear(key1));
+                test_dbg!(slab2.remove(key1));
                 drop(item2)
             });
             assert_eq!(item1.get_ref(), &String::from("hello"));
-            test_dbg!(slab.clear(key2));
+            test_dbg!(slab.remove(key2));
             drop(item1);
             (t2, key2)
         });
