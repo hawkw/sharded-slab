@@ -1,3 +1,34 @@
+<a name="0.1.0"></a>
+## 0.1.0 (2020-10-20)
+
+
+#### Bug Fixes
+
+*   fix `remove` and `clear` returning true when the key is stale ([b52d38b2](https://github.com/hawkw/sharded-slab/commit/b52d38b2d2d3edc3a59d3dba6b75095bbd864266))
+
+#### Breaking Changes
+
+* **Pool:**  change `Pool::create` to return a mutable guard (#48) ([778065ea](https://github.com/hawkw/sharded-slab/commit/778065ead83523e0a9d951fbd19bb37fda3cc280), closes [#41](https://github.com/hawkw/sharded-slab/issues/41), [#16](https://github.com/hawkw/sharded-slab/issues/16))
+* **Slab:**  rename `Guard` to `Entry` for consistency ([425ad398](https://github.com/hawkw/sharded-slab/commit/425ad39805ee818dc6b332286006bc92c8beab38))
+
+#### Features
+
+*   add missing `Debug` impls ([71a8883f](https://github.com/hawkw/sharded-slab/commit/71a8883ff4fd861b95e81840cb5dca167657fe36))
+* **Pool:**
+  *  add `Pool::create_owned` and `OwnedRefMut` ([f7774ae0](https://github.com/hawkw/sharded-slab/commit/f7774ae0c5be99340f1e7941bde62f7044f4b4d8))
+  *  add `Arc<Pool>::get_owned` and `OwnedRef` ([3e566d91](https://github.com/hawkw/sharded-slab/commit/3e566d91e1bc8cc4630a8635ad24b321ec047fe7), closes [#29](https://github.com/hawkw/sharded-slab/issues/29))
+  *  change `Pool::create` to return a mutable guard (#48) ([778065ea](https://github.com/hawkw/sharded-slab/commit/778065ead83523e0a9d951fbd19bb37fda3cc280), closes [#41](https://github.com/hawkw/sharded-slab/issues/41), [#16](https://github.com/hawkw/sharded-slab/issues/16))
+* **Slab:**
+  *  add `Arc<Slab>::get_owned` and `OwnedEntry` ([53a970a2](https://github.com/hawkw/sharded-slab/commit/53a970a2298c30c1afd9578268c79ccd44afba05), closes [#29](https://github.com/hawkw/sharded-slab/issues/29))
+  *  rename `Guard` to `Entry` for consistency ([425ad398](https://github.com/hawkw/sharded-slab/commit/425ad39805ee818dc6b332286006bc92c8beab38))
+  *  add `slab`-style `VacantEntry` API ([6776590a](https://github.com/hawkw/sharded-slab/commit/6776590adeda7bf4a117fb233fc09cfa64d77ced), closes [#16](https://github.com/hawkw/sharded-slab/issues/16))
+
+#### Performance
+
+*   allocate shard metadata lazily (#45) ([e543a06d](https://github.com/hawkw/sharded-slab/commit/e543a06d7474b3ff92df2cdb4a4571032135ff8d))
+
+
+
 <a name="0.0.9"></a>
 ### 0.0.9 (2020-04-03)
 
