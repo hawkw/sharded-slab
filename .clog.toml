@@ -3,7 +3,7 @@
 # all commit and issue links
 repository = "https://github.com/hawkw/sharded-slab"
 # A constant release title
-subtitle = "sharded-slab"
+# subtitle = "sharded-slab"
 
 # specify the style of commit links to generate, defaults to "github" if omitted
 link-style = "github"
