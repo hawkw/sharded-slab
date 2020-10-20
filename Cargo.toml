@@ -18,7 +18,11 @@ A lock-free concurrent slab.
 maintenance = { status = "experimental" }
 
 [[bench]]
-name = "bench"
+name = "comparison"
+harness = false
+
+[[bench]]
+name = "opt"
 harness = false
 
 [dependencies]
