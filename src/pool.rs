@@ -9,7 +9,6 @@ use crate::{
     cfg::{self, CfgPrivate, DefaultConfig},
     clear::Clear,
     page, shard,
-    sync::atomic,
     tid::Tid,
     Pack, Shard,
 };
@@ -591,12 +590,7 @@ where
             self.inner.release()
         };
         if should_clear {
-            atomic::fence(atomic::Ordering::Acquire);
-            if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.clear_local(self.key);
-            } else {
-                self.shard.clear_remote(self.key);
-            }
+            self.shard.clear_after_release(self.key);
         }
     }
 }
@@ -733,12 +727,7 @@ where
             self.inner.release()
         };
         if should_clear {
-            atomic::fence(atomic::Ordering::Acquire);
-            if Tid::<C>::current().as_usize() == self.shard.tid {
-                self.shard.clear_local(self.key);
-            } else {
-                self.shard.clear_remote(self.key);
-            }
+            self.shard.clear_after_release(self.key);
         }
     }
 }
@@ -819,12 +808,7 @@ where
             let shard_idx = Tid::<C>::from_packed(self.key);
             test_println!("-> shard={:?}", shard_idx);
             if let Some(shard) = self.pool.shards.get(shard_idx.as_usize()) {
-                atomic::fence(atomic::Ordering::Acquire);
-                if Tid::<C>::current().as_usize() == shard.tid {
-                    shard.clear_local(self.key);
-                } else {
-                    shard.clear_remote(self.key);
-                }
+                shard.clear_after_release(self.key);
             } else {
                 test_println!("-> shard={:?} does not exist! THIS IS A BUG", shard_idx);
                 debug_assert!(std::thread::panicking(), "[internal error] tried to drop an `OwnedRef` to a slot on a shard that never existed!");
