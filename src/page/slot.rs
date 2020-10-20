@@ -16,13 +16,8 @@ pub(crate) struct Slot<T, C> {
 }
 
 #[derive(Debug)]
-pub(crate) struct Guard<'a, T, C: cfg::Config = cfg::DefaultConfig> {
-    slot: &'a Slot<T, C>,
-}
-
-#[derive(Debug)]
-pub(crate) struct GuardMut<'a, T, C: cfg::Config = cfg::DefaultConfig> {
-    slot: &'a Slot<T, C>,
+pub(crate) struct Guard<T, C: cfg::Config = cfg::DefaultConfig> {
+    slot: ptr::NonNull<Slot<T, C>>,
 }
 
 #[derive(Debug)]
@@ -109,7 +104,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn get<'a>(&'a self, gen: Generation<C>) -> Option<Guard<'a, T, C>> {
+    pub(crate) fn get(&self, gen: Generation<C>) -> Option<Guard<T, C>> {
         let mut lifecycle = self.lifecycle.load(Ordering::Acquire);
         loop {
             // Unpack the current state.
@@ -144,13 +139,10 @@ where
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
-                    // Okay, the ref count was incremented successfully! We can
-                    // now return a guard!
-                    // let item = f(self.value());
-
                     test_println!("-> {:?}", new_refs);
-
-                    return Some(Guard { slot: self });
+                    return Some(Guard {
+                        slot: ptr::NonNull::from(self),
+                    });
                 }
                 Err(actual) => {
                     // Another thread modified the slot's state before us! We
@@ -599,18 +591,41 @@ impl<C: cfg::Config> Copy for Generation<C> {}
 
 // === impl Guard ===
 
-impl<'a, T, C: cfg::Config> Guard<'a, T, C> {
-    pub(crate) fn release(&self) -> bool {
-        self.slot.release()
+impl<T, C: cfg::Config> Guard<T, C> {
+    /// Releases the guard, returning `true` if the slot should be cleared.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `Guard` does not outlive the slab that contains
+    /// the pointed slot. Failure to do so means this pointer may dangle.
+    #[inline]
+    pub(crate) unsafe fn release(&self) -> bool {
+        self.slot().release()
     }
 
-    pub(crate) fn slot(&self) -> &Slot<T, C> {
-        self.slot
+    /// Returns a borrowed reference to the slot.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `Guard` does not outlive the slab that contains
+    /// the pointed slot. Failure to do so means this pointer may dangle.
+    #[inline]
+    pub(crate) unsafe fn slot(&self) -> &Slot<T, C> {
+        self.slot.as_ref()
     }
 
+    /// Returns a borrowed reference to the slot's value.
+    ///
+    /// ## Safety
+    ///
+    /// This dereferences a raw pointer to the slot. The caller is responsible
+    /// for ensuring that the `Guard` does not outlive the slab that contains
+    /// the pointed slot. Failure to do so means this pointer may dangle.
     #[inline(always)]
-    pub(crate) fn value(&self) -> &T {
-        self.slot.item.with(|item| unsafe { &*item })
+    pub(crate) unsafe fn value(&self) -> &T {
+        self.slot().item.with(|item| &*item)
     }
 }
 
@@ -785,7 +800,7 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
         self.slot.as_ref().item.with_mut(|val| &mut *val)
     }
 
-    /// Releases the guard, returning whether the slot should be cleared.
+    /// Releases the guard, returning `true` if the slot should be cleared.
     ///
     /// ## Safety
     ///

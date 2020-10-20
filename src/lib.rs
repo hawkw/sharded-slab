@@ -262,7 +262,7 @@ pub struct Slab<T, C: cfg::Config = DefaultConfig> {
 /// references is currently being accessed. If the item is removed from the slab
 /// while a guard exists, the removal will be deferred until all guards are dropped.
 pub struct Entry<'a, T, C: cfg::Config = DefaultConfig> {
-    inner: page::slot::Guard<'a, Option<T>, C>,
+    inner: page::slot::Guard<Option<T>, C>,
     value: ptr::NonNull<T>,
     shard: &'a Shard<Option<T>, C>,
     key: usize,
@@ -537,13 +537,15 @@ impl<T, C: cfg::Config> Slab<T, C> {
 
         test_println!("get {:?}; current={:?}", tid, Tid::<C>::current());
         let shard = self.shards.get(tid.as_usize())?;
-        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
-        let value = ptr::NonNull::from(inner.slot().value().as_ref().unwrap());
-        Some(Entry {
-            inner,
-            value,
-            shard,
-            key,
+        shard.with_slot(key, |slot| {
+            let inner = slot.get(C::unpack_gen(key))?;
+            let value = ptr::NonNull::from(slot.value().as_ref().unwrap());
+            Some(Entry {
+                inner,
+                value,
+                shard,
+                key,
+            })
         })
     }
 
@@ -626,7 +628,15 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for Entry<'a, T, C> {
 impl<'a, T, C: cfg::Config> Drop for Entry<'a, T, C> {
     fn drop(&mut self) {
         use crate::sync::atomic;
-        if self.inner.release() {
+        let should_remove = unsafe {
+            // Safety: calling `slot::Guard::release` is unsafe, since the
+            // `Guard` value contains a pointer to the slot that may outlive the
+            // slab containing that slot. Here, the `Entry` guard owns a
+            // borrowed reference to the shard containing that slot, which
+            // ensures that the slot will not be dropped while this `Guard` exists.
+            self.inner.release()
+        };
+        if should_remove {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
                 self.shard.take_local(self.key);

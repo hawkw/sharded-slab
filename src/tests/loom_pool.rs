@@ -1,12 +1,13 @@
 use super::util::*;
-use crate::{clear::Clear, Pack, Pool};
+use crate::{clear::Clear, sync::alloc, Pack, Pool};
 use loom::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex,
+        Condvar, Mutex,
     },
     thread,
 };
+use std::sync::Arc;
 
 #[derive(Default, Debug)]
 struct State {
@@ -324,5 +325,148 @@ fn create_mut_downgrade_during_clear() {
         drop(guard);
 
         assert!(pool.get(key).is_none());
+    });
+}
+
+#[test]
+fn ownedref_send_out_of_local() {
+    run_model("ownedref_send_out_of_local", || {
+        let pool = Arc::new(Pool::<alloc::Track<String>>::new());
+        let key1 = pool
+            .create_with(|item| item.get_mut().push_str("hello"))
+            .expect("create item 1");
+        let key2 = pool
+            .create_with(|item| item.get_mut().push_str("goodbye"))
+            .expect("create item 2");
+
+        let item1 = pool.clone().get_owned(key1).expect("get key1");
+        let item2 = pool.clone().get_owned(key2).expect("get key2");
+        let pool2 = pool.clone();
+
+        test_dbg!(pool.clear(key1));
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            drop(item1);
+        });
+        let t2 = thread::spawn(move || {
+            assert_eq!(item2.get_ref(), &String::from("goodbye"));
+            test_dbg!(pool2.clear(key2));
+            drop(item2);
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        assert!(pool.get(key1).is_none());
+        assert!(pool.get(key2).is_none());
+    });
+}
+
+#[test]
+fn ownedrefs_outlive_pool() {
+    run_model("ownedrefs_outlive_pool", || {
+        let pool = Arc::new(Pool::<alloc::Track<String>>::new());
+        let key1 = pool
+            .create_with(|item| item.get_mut().push_str("hello"))
+            .expect("create item 1");
+        let key2 = pool
+            .create_with(|item| item.get_mut().push_str("goodbye"))
+            .expect("create item 2");
+
+        let item1_1 = pool.clone().get_owned(key1).expect("get key1");
+        let item1_2 = pool.clone().get_owned(key1).expect("get key1 again");
+        let item2 = pool.clone().get_owned(key2).expect("get key2");
+        drop(pool);
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1_1.get_ref(), &String::from("hello"));
+            drop(item1_1);
+        });
+
+        let t2 = thread::spawn(move || {
+            assert_eq!(item2.get_ref(), &String::from("goodbye"));
+            drop(item2);
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        assert_eq!(item1_2.get_ref(), &String::from("hello"));
+    });
+}
+
+#[test]
+fn ownedref_ping_pong() {
+    run_model("ownedref_ping_pong", || {
+        let pool = Arc::new(Pool::<alloc::Track<String>>::new());
+        let key1 = pool
+            .create_with(|item| item.get_mut().push_str("hello"))
+            .expect("create item 1");
+        let key2 = pool
+            .create_with(|item| item.get_mut().push_str("world"))
+            .expect("create item 2");
+
+        let item1 = pool.clone().get_owned(key1).expect("get key1");
+        let pool2 = pool.clone();
+        let pool3 = pool.clone();
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            pool2.clear(key1);
+            item1
+        });
+
+        let t2 = thread::spawn(move || {
+            let item2 = pool3.clone().get_owned(key2).unwrap();
+            assert_eq!(item2.get_ref(), &String::from("world"));
+            pool3.clear(key1);
+            item2
+        });
+
+        let item1 = t1.join().unwrap();
+        let item2 = t2.join().unwrap();
+
+        assert_eq!(item1.get_ref(), &String::from("hello"));
+        assert_eq!(item2.get_ref(), &String::from("world"));
+    });
+}
+
+#[test]
+fn ownedref_drop_from_other_threads() {
+    run_model("ownedref_drop_from_other_threads", || {
+        let pool = Arc::new(Pool::<alloc::Track<String>>::new());
+        let key1 = pool
+            .create_with(|item| item.get_mut().push_str("hello"))
+            .expect("create item 1");
+        let item1 = pool.clone().get_owned(key1).expect("get key1");
+
+        let pool2 = pool.clone();
+
+        let t1 = thread::spawn(move || {
+            let pool = pool2.clone();
+            let key2 = pool
+                .create_with(|item| item.get_mut().push_str("goodbye"))
+                .expect("create item 1");
+            let item2 = pool.clone().get_owned(key2).expect("get key1");
+            let t2 = thread::spawn(move || {
+                assert_eq!(item2.get_ref(), &String::from("goodbye"));
+                test_dbg!(pool2.clear(key1));
+                drop(item2)
+            });
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            test_dbg!(pool.clear(key2));
+            drop(item1);
+            (t2, key2)
+        });
+
+        let (t2, key2) = t1.join().unwrap();
+        test_dbg!(pool.get(key1));
+        test_dbg!(pool.get(key2));
+
+        t2.join().unwrap();
+
+        assert!(pool.get(key1).is_none());
+        assert!(pool.get(key2).is_none());
     });
 }

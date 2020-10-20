@@ -14,7 +14,7 @@ use crate::{
     Pack, Shard,
 };
 
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 /// A lock-free concurrent object pool.
 ///
@@ -91,36 +91,17 @@ where
     _cfg: PhantomData<C>,
 }
 
-impl<T> Pool<T>
-where
-    T: Clear + Default,
-{
-    /// Returns a new `Pool` with the default configuration parameters.
-    pub fn new() -> Self {
-        Self::new_with_config()
-    }
-
-    /// Returns a new `Pool` with the provided configuration parameters.
-    pub fn new_with_config<C: cfg::Config>() -> Pool<T, C> {
-        C::validate();
-        Pool {
-            shards: shard::Array::new(),
-            _cfg: PhantomData,
-        }
-    }
-}
-
 /// A guard that allows access to an object in a pool.
 ///
 /// While the guard exists, it indicates to the pool that the item the guard references is
 /// currently being accessed. If the item is removed from the pool while the guard exists, the
 /// removal will be deferred until all guards are dropped.
-pub struct Ref<'a, T, C>
+pub struct Ref<'a, T, C = DefaultConfig>
 where
     T: Clear + Default,
     C: cfg::Config,
 {
-    inner: page::slot::Guard<'a, T, C>,
+    inner: page::slot::Guard<T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
 }
@@ -140,6 +121,117 @@ where
     inner: page::slot::InitGuard<T, C>,
     shard: &'a Shard<T, C>,
     key: usize,
+}
+
+/// An owned guard that allows access to an object in a pool.
+///
+/// While the guard exists, it indicates to the pool that the item the guard references is
+/// currently being accessed. If the item is removed from the pool while the guard exists, the
+/// removal will be deferred until all guards are dropped.
+///
+/// Unlike [`Ref`], which borrows the pool, an `OwnedRef` clones the `Arc`
+/// around the pool. Therefore, it keeps the pool from being dropped until all
+/// such guards have been dropped. This means that an `OwnedRef` may be held for
+/// an arbitrary lifetime.
+///
+///
+/// # Examples
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use std::sync::Arc;
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+///
+/// // Look up the created `Key`, returning an `OwnedRef`.
+/// let value = pool.clone().get_owned(key).unwrap();
+///
+/// // Now, the original `Arc` clone of the pool may be dropped, but the
+/// // returned `OwnedRef` can still access the value.
+/// assert_eq!(value, String::from("hello world"));
+/// ```
+///
+/// Unlike [`Ref`], an `OwnedRef` may be stored in a struct which must live
+/// for the `'static` lifetime:
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use sharded_slab::pool::OwnedRef;
+/// use std::sync::Arc;
+///
+/// pub struct MyStruct {
+///     pool_ref: OwnedRef<String>,
+///     // ... other fields ...
+/// }
+///
+/// // Suppose this is some arbitrary function which requires a value that
+/// // lives for the 'static lifetime...
+/// fn function_requiring_static<T: 'static>(t: &T) {
+///     // ... do something extremely important and interesting ...
+/// }
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+///
+/// // Look up the created `Key`, returning an `OwnedRef`.
+/// let pool_ref = pool.clone().get_owned(key).unwrap();
+/// let my_struct = MyStruct {
+///     pool_ref,
+///     // ...
+/// };
+///
+/// // We can use `my_struct` anywhere where it is required to have the
+/// // `'static` lifetime:
+/// function_requiring_static(&my_struct);
+/// ```
+///
+/// `OwnedRef`s may be sent between threads:
+///
+/// ```
+/// # use sharded_slab::Pool;
+/// use std::{thread, sync::Arc};
+///
+/// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+/// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+///
+/// // Look up the created `Key`, returning an `OwnedRef`.
+/// let value = pool.clone().get_owned(key).unwrap();
+///
+/// thread::spawn(move || {
+///     assert_eq!(value, String::from("hello world"));
+///     // ...
+/// }).join().unwrap();
+/// ```
+///
+/// [`Ref`]: crate::pool::Ref
+pub struct OwnedRef<T, C = DefaultConfig>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    inner: page::slot::Guard<T, C>,
+    pool: Arc<Pool<T, C>>,
+    key: usize,
+}
+
+impl<T> Pool<T>
+where
+    T: Clear + Default,
+{
+    /// Returns a new `Pool` with the default configuration parameters.
+    pub fn new() -> Self {
+        Self::new_with_config()
+    }
+
+    /// Returns a new `Pool` with the provided configuration parameters.
+    pub fn new_with_config<C: cfg::Config>() -> Pool<T, C> {
+        C::validate();
+        Pool {
+            shards: shard::Array::new(),
+            _cfg: PhantomData,
+        }
+    }
 }
 
 impl<T, C> Pool<T, C>
@@ -235,7 +327,7 @@ where
         Some(guard.key())
     }
 
-    /// Return a reference to the value associated with the given key.
+    /// Return a borrowed reference to the value associated with the given key.
     ///
     /// If the pool does not contain a value for the given key, `None` is returned instead.
     ///
@@ -256,6 +348,101 @@ where
         let shard = self.shards.get(tid.as_usize())?;
         let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
         Some(Ref { inner, shard, key })
+    }
+
+    /// Return an owned reference to the value associated with the given key.
+    ///
+    /// If the pool does not contain a value for the given key, `None` is
+    /// returned instead.
+    ///
+    /// Unlike [`get`], which borrows the pool, this method _clones_ the `Arc`
+    /// around the pool if a value exists for the given key. This means that the
+    /// returned [`OwnedRef`] can be held for an arbitrary lifetime. However,
+    /// this method requires that the pool itself be wrapped in an `Arc`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use sharded_slab::Pool;
+    /// use std::sync::Arc;
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    /// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+    ///
+    /// // Look up the created `Key`, returning an `OwnedRef`.
+    /// let value = pool.clone().get_owned(key).unwrap();
+    ///
+    /// // Now, the original `Arc` clone of the pool may be dropped, but the
+    /// // returned `OwnedRef` can still access the value.
+    /// assert_eq!(value, String::from("hello world"));
+    /// ```
+    ///
+    /// Unlike [`Ref`], an `OwnedRef` may be stored in a struct which must live
+    /// for the `'static` lifetime:
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// use sharded_slab::pool::OwnedRef;
+    /// use std::sync::Arc;
+    ///
+    /// pub struct MyStruct {
+    ///     pool_ref: OwnedRef<String>,
+    ///     // ... other fields ...
+    /// }
+    ///
+    /// // Suppose this is some arbitrary function which requires a value that
+    /// // lives for the 'static lifetime...
+    /// fn function_requiring_static<T: 'static>(t: &T) {
+    ///     // ... do something extremely important and interesting ...
+    /// }
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    /// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+    ///
+    /// // Look up the created `Key`, returning an `OwnedRef`.
+    /// let pool_ref = pool.clone().get_owned(key).unwrap();
+    /// let my_struct = MyStruct {
+    ///     pool_ref,
+    ///     // ...
+    /// };
+    ///
+    /// // We can use `my_struct` anywhere where it is required to have the
+    /// // `'static` lifetime:
+    /// function_requiring_static(&my_struct);
+    /// ```
+    ///
+    /// `OwnedRef`s may be sent between threads:
+    ///
+    /// ```
+    /// # use sharded_slab::Pool;
+    /// use std::{thread, sync::Arc};
+    ///
+    /// let pool: Arc<Pool<String>> = Arc::new(Pool::new());
+    /// let key = pool.create_with(|item| item.push_str("hello world")).unwrap();
+    ///
+    /// // Look up the created `Key`, returning an `OwnedRef`.
+    /// let value = pool.clone().get_owned(key).unwrap();
+    ///
+    /// thread::spawn(move || {
+    ///     assert_eq!(value, String::from("hello world"));
+    ///     // ...
+    /// }).join().unwrap();
+    /// ```
+    ///
+    /// [`get`]: Pool::get
+    /// [`OwnedRef`]: crate::pool::OwnedRef
+    /// [`Ref`]: crate::pool::Ref
+    pub fn get_owned(self: Arc<Self>, key: usize) -> Option<OwnedRef<T, C>> {
+        let tid = C::unpack_tid(key);
+
+        test_println!("pool: get{:?}; current={:?}", tid, Tid::<C>::current());
+        let shard = self.shards.get(tid.as_usize())?;
+        let inner = shard.with_slot(key, |slot| slot.get(C::unpack_gen(key)))?;
+        Some(OwnedRef {
+            inner,
+            pool: self.clone(),
+            key,
+        })
     }
 
     /// Remove the value using the storage associated with the given key from the pool, returning
@@ -350,6 +537,8 @@ where
     }
 }
 
+// === impl Ref ===
+
 impl<'a, T, C> Ref<'a, T, C>
 where
     T: Clear + Default,
@@ -362,7 +551,14 @@ where
 
     #[inline]
     fn value(&self) -> &T {
-        self.inner.value()
+        unsafe {
+            // Safety: calling `slot::Guard::value` is unsafe, since the `Guard`
+            // value contains a pointer to the slot that may outlive the slab
+            // containing that slot. Here, the `Ref` has a borrowed reference to
+            // the shard containing that slot, which ensures that the slot will
+            // not be dropped while this `Guard` exists.
+            self.inner.value()
+        }
     }
 }
 
@@ -384,8 +580,17 @@ where
     C: cfg::Config,
 {
     fn drop(&mut self) {
-        test_println!("-> drop Ref: try clearing data");
-        if self.inner.release() {
+        test_println!("drop Ref: try clearing data");
+        let should_clear = unsafe {
+            // Safety: calling `slot::Guard::release` is unsafe, since the
+            // `Guard` value contains a pointer to the slot that may outlive the
+            // slab containing that slot. Here, the `Ref` guard owns a
+            // borrowed reference to the shard containing that slot, which
+            // ensures that the slot will not be dropped while this `Ref`
+            // exists.
+            self.inner.release()
+        };
+        if should_clear {
             atomic::fence(atomic::Ordering::Acquire);
             if Tid::<C>::current().as_usize() == self.shard.tid {
                 self.shard.clear_local(self.key);
@@ -556,4 +761,108 @@ where
     fn eq(&self, other: &T) -> bool {
         self.value().eq(other)
     }
+}
+
+// === impl OwnedRef ===
+
+impl<T, C> OwnedRef<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    /// Returns the key used to access this guard
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    #[inline]
+    fn value(&self) -> &T {
+        unsafe {
+            // Safety: calling `slot::Guard::value` is unsafe, since the `Guard`
+            // value contains a pointer to the slot that may outlive the slab
+            // containing that slot. Here, the `Ref` has a borrowed reference to
+            // the shard containing that slot, which ensures that the slot will
+            // not be dropped while this `Guard` exists.
+            self.inner.value()
+        }
+    }
+}
+
+impl<T, C> std::ops::Deref for OwnedRef<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl<T, C> Drop for OwnedRef<T, C>
+where
+    T: Clear + Default,
+    C: cfg::Config,
+{
+    fn drop(&mut self) {
+        test_println!("drop OwnedRef: try clearing data");
+        let should_clear = unsafe {
+            // Safety: calling `slot::Guard::release` is unsafe, since the
+            // `Guard` value contains a pointer to the slot that may outlive the
+            // slab containing that slot. Here, the `OwnedRef` owns an `Arc`
+            // clone of the pool, which keeps it alive as long as the `OwnedRef`
+            // exists.
+            self.inner.release()
+        };
+        if should_clear {
+            let shard_idx = Tid::<C>::from_packed(self.key);
+            test_println!("-> shard={:?}", shard_idx);
+            if let Some(shard) = self.pool.shards.get(shard_idx.as_usize()) {
+                atomic::fence(atomic::Ordering::Acquire);
+                if Tid::<C>::current().as_usize() == shard.tid {
+                    shard.clear_local(self.key);
+                } else {
+                    shard.clear_remote(self.key);
+                }
+            } else {
+                test_println!("-> shard={:?} does not exist! THIS IS A BUG", shard_idx);
+                debug_assert!(std::thread::panicking(), "[internal error] tried to drop an `OwnedRef` to a slot on a shard that never existed!");
+            }
+        }
+    }
+}
+
+impl<T, C> fmt::Debug for OwnedRef<T, C>
+where
+    T: fmt::Debug + Clear + Default,
+    C: cfg::Config,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.value(), f)
+    }
+}
+
+impl<T, C> PartialEq<T> for OwnedRef<T, C>
+where
+    T: PartialEq<T> + Clear + Default,
+    C: cfg::Config,
+{
+    fn eq(&self, other: &T) -> bool {
+        *self.value() == *other
+    }
+}
+
+unsafe impl<T, C> Sync for OwnedRef<T, C>
+where
+    T: Sync + Clear + Default,
+    C: cfg::Config,
+{
+}
+
+unsafe impl<T, C> Send for OwnedRef<T, C>
+where
+    T: Sync + Clear + Default,
+    C: cfg::Config,
+{
 }
