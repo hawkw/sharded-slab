@@ -2,15 +2,64 @@ pub(crate) use self::inner::*;
 
 #[cfg(loom)]
 mod inner {
+    pub(crate) use loom::cell::UnsafeCell;
     pub(crate) use loom::lazy_static;
     pub(crate) use loom::sync::Mutex;
-    pub(crate) use loom::{alloc, cell::UnsafeCell};
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
     pub(crate) use loom::thread::yield_now;
     pub(crate) use loom::thread_local;
+
+    pub(crate) mod alloc {
+        #[allow(dead_code)]
+        use loom::alloc;
+        use std::fmt;
+        /// Track allocations, detecting leaks
+        ///
+        /// This is a version of `loom::alloc::Track` that adds a missing
+        /// `Default` impl.
+        pub struct Track<T>(alloc::Track<T>);
+
+        impl<T> Track<T> {
+            /// Track a value for leaks
+            #[inline(always)]
+            pub fn new(value: T) -> Track<T> {
+                Track(alloc::Track::new(value))
+            }
+
+            /// Get a reference to the value
+            #[inline(always)]
+            pub fn get_ref(&self) -> &T {
+                self.0.get_ref()
+            }
+
+            /// Get a mutable reference to the value
+            #[inline(always)]
+            pub fn get_mut(&mut self) -> &mut T {
+                self.0.get_mut()
+            }
+
+            /// Stop tracking the value for leaks
+            #[inline(always)]
+            pub fn into_inner(self) -> T {
+                self.0.into_inner()
+            }
+        }
+
+        impl<T: fmt::Debug> fmt::Debug for Track<T> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl<T: Default> Default for Track<T> {
+            fn default() -> Self {
+                Self::new(T::default())
+            }
+        }
+    }
 }
 
 #[cfg(not(loom))]
@@ -48,7 +97,7 @@ mod inner {
 
     pub(crate) mod alloc {
         /// Track allocations, detecting leaks
-        #[derive(Debug)]
+        #[derive(Debug, Default)]
         pub struct Track<T> {
             value: T,
         }
