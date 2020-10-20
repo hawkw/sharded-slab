@@ -947,7 +947,7 @@ where
     }
 }
 
-// === impl GuardMut ===
+// === impl RefMut ===
 
 impl<'a, T, C: cfg::Config> RefMut<'a, T, C>
 where
@@ -957,6 +957,15 @@ where
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
         self.key
+    }
+
+    pub fn clear_on_drop(&self) {
+        unsafe {
+            // Safety: we are holding a reference to the shard which keeps the
+            // pointed slot alive. The returned reference will not outlive
+            // `self`.
+            self.inner.mark_clear()
+        }
     }
 
     /// Downgrades the mutable guard to an immutable guard, allowing access to

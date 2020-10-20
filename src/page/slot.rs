@@ -773,6 +773,20 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
         LifecycleGen::<C>::from_packed(self.curr_lifecycle).0
     }
 
+    pub(crate) unsafe fn mark_clear(&self) {
+        let _res = self.slot.as_ref().lifecycle.compare_exchange(
+            self.curr_lifecycle,
+            Lifecycle::<C> {
+                state: State::Marked,
+                _cfg: PhantomData,
+            }
+            .pack(self.curr_lifecycle),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        debug_assert!(_res.is_ok())
+    }
+
     /// Returns a borrowed reference to the slot's value.
     ///
     /// ## Safety
