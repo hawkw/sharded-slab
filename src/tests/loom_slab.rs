@@ -1,8 +1,12 @@
 use super::util::*;
+use crate::sync::alloc;
 use crate::Slab;
-use loom::sync::{Arc, Condvar, Mutex};
+use loom::sync::{Condvar, Mutex};
 use loom::thread;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 #[test]
 fn take_local() {
@@ -609,5 +613,148 @@ fn vacant_entry_remove() {
 
         entry.insert("hello world");
         assert_eq!(slab.get(key).expect("get"), "hello world");
+    });
+}
+
+#[test]
+fn owned_entry_send_out_of_local() {
+    run_model("owned_entry_send_out_of_local", || {
+        let slab = Arc::new(Slab::<alloc::Track<String>>::new());
+        let key1 = slab
+            .insert(alloc::Track::new(String::from("hello")))
+            .expect("insert item 1");
+        let key2 = slab
+            .insert(alloc::Track::new(String::from("goodbye")))
+            .expect("insert item 2");
+
+        let item1 = slab.clone().get_owned(key1).expect("get key1");
+        let item2 = slab.clone().get_owned(key2).expect("get key2");
+        let slab2 = slab.clone();
+
+        test_dbg!(slab.clear(key1));
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            drop(item1);
+        });
+        let t2 = thread::spawn(move || {
+            assert_eq!(item2.get_ref(), &String::from("goodbye"));
+            test_dbg!(slab2.clear(key2));
+            drop(item2);
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        assert!(slab.get(key1).is_none());
+        assert!(slab.get(key2).is_none());
+    });
+}
+
+#[test]
+fn owned_entrys_outlive_slab() {
+    run_model("owned_entrys_outlive_slab", || {
+        let slab = Arc::new(Slab::<alloc::Track<String>>::new());
+        let key1 = slab
+            .insert(alloc::Track::new(String::from("hello")))
+            .expect("insert item 1");
+        let key2 = slab
+            .insert(alloc::Track::new(String::from("goodbye")))
+            .expect("insert item 2");
+
+        let item1_1 = slab.clone().get_owned(key1).expect("get key1");
+        let item1_2 = slab.clone().get_owned(key1).expect("get key1 again");
+        let item2 = slab.clone().get_owned(key2).expect("get key2");
+        drop(slab);
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1_1.get_ref(), &String::from("hello"));
+            drop(item1_1);
+        });
+
+        let t2 = thread::spawn(move || {
+            assert_eq!(item2.get_ref(), &String::from("goodbye"));
+            drop(item2);
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        assert_eq!(item1_2.get_ref(), &String::from("hello"));
+    });
+}
+
+#[test]
+fn owned_entry_ping_pong() {
+    run_model("owned_entry_ping_pong", || {
+        let slab = Arc::new(Slab::<alloc::Track<String>>::new());
+        let key1 = slab
+            .insert(alloc::Track::new(String::from("hello")))
+            .expect("insert item 1");
+        let key2 = slab
+            .insert(alloc::Track::new(String::from("world")))
+            .expect("insert item 2");
+
+        let item1 = slab.clone().get_owned(key1).expect("get key1");
+        let slab2 = slab.clone();
+        let slab3 = slab.clone();
+
+        let t1 = thread::spawn(move || {
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            slab2.clear(key1);
+            item1
+        });
+
+        let t2 = thread::spawn(move || {
+            let item2 = slab3.clone().get_owned(key2).unwrap();
+            assert_eq!(item2.get_ref(), &String::from("world"));
+            slab3.clear(key1);
+            item2
+        });
+
+        let item1 = t1.join().unwrap();
+        let item2 = t2.join().unwrap();
+
+        assert_eq!(item1.get_ref(), &String::from("hello"));
+        assert_eq!(item2.get_ref(), &String::from("world"));
+    });
+}
+
+#[test]
+fn owned_entry_drop_from_other_threads() {
+    run_model("owned_entry_drop_from_other_threads", || {
+        let slab = Arc::new(Slab::<alloc::Track<String>>::new());
+        let key1 = slab
+            .insert(alloc::Track::new(String::from("hello")))
+            .expect("insert item 1");
+        let item1 = slab.clone().get_owned(key1).expect("get key1");
+
+        let slab2 = slab.clone();
+
+        let t1 = thread::spawn(move || {
+            let slab = slab2.clone();
+            let key2 = slab
+                .insert(alloc::Track::new(String::from("goodbye")))
+                .expect("insert item 1");
+            let item2 = slab.clone().get_owned(key2).expect("get key1");
+            let t2 = thread::spawn(move || {
+                assert_eq!(item2.get_ref(), &String::from("goodbye"));
+                test_dbg!(slab2.clear(key1));
+                drop(item2)
+            });
+            assert_eq!(item1.get_ref(), &String::from("hello"));
+            test_dbg!(slab.clear(key2));
+            drop(item1);
+            (t2, key2)
+        });
+
+        let (t2, key2) = t1.join().unwrap();
+        test_dbg!(slab.get(key1));
+        test_dbg!(slab.get(key2));
+
+        t2.join().unwrap();
+
+        assert!(slab.get(key1).is_none());
+        assert!(slab.get(key2).is_none());
     });
 }
