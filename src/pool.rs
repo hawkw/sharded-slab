@@ -1272,11 +1272,10 @@ where
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe {
             // Safety: calling `slot::InitGuard::value_mut` is unsafe, since the
-            // `Guard`
-            // value contains a pointer to the slot that may outlive the slab
-            // containing that slot. Here, the `OwnedRefMut` has an `Arc` clone of
-            // the shard containing that slot, which ensures that the slot will
-            // not be dropped while this `Guard` exists.
+            // `Guard`  value contains a pointer to the slot that may outlive
+            // the slab   containing that slot. Here, the `OwnedRefMut` has an
+            // `Arc` clone of the shard containing that slot, which ensures that
+            // the slot will not be dropped while this `Guard` exists.
             self.inner.value_mut()
         }
     }
@@ -1292,9 +1291,9 @@ where
         let should_clear = unsafe {
             // Safety: calling `slot::Guard::release` is unsafe, since the
             // `Guard` value contains a pointer to the slot that may outlive the
-            // slab containing that slot. Here, the `OwnedRef` owns an `Arc`
-            // clone of the pool, which keeps it alive as long as the `OwnedRef`
-            // exists.
+            // slab containing that slot. Here, the `OwnedRefMut` owns an `Arc`
+            // clone of the pool, which keeps it alive as long as the
+            // `OwnedRefMut` exists.
             self.inner.release()
         };
         if should_clear {
