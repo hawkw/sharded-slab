@@ -3,13 +3,12 @@ use crate::{
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local,
     },
     Pack,
 };
 use std::{
     cell::{Cell, UnsafeCell},
-    collections::VecDeque,
     fmt,
     marker::PhantomData,
 };
@@ -17,24 +16,11 @@ use std::{
 /// Uniquely identifies a thread.
 pub(crate) struct Tid<C> {
     id: usize,
-    _not_send: PhantomData<UnsafeCell<()>>,
-    _cfg: PhantomData<fn(C)>,
+    _not_send: PhantomData<UnsafeCell<C>>,
 }
 
 #[derive(Debug)]
 struct Registration(Cell<Option<usize>>);
-
-struct Registry {
-    next: AtomicUsize,
-    free: Mutex<VecDeque<usize>>,
-}
-
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
@@ -135,47 +121,20 @@ impl Registration {
         Self(Cell::new(None))
     }
 
-    #[inline(always)]
+    #[inline]
     fn current<C: cfg::Config>(&self) -> Tid<C> {
         if let Some(tid) = self.0.get().map(Tid::new) {
-            tid
-        } else {
-            self.register()
+            return tid;
         }
+
+        self.register()
     }
 
-    #[cold]
     fn register<C: cfg::Config>(&self) -> Tid<C> {
-        let id = REGISTRY
-            .free
-            .lock()
-            .ok()
-            .and_then(|mut free| {
-                if free.len() > 1 {
-                    free.pop_front()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| REGISTRY.next.fetch_add(1, Ordering::AcqRel));
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, Ordering::AcqRel);
         debug_assert!(id <= Tid::<C>::BITS, "thread ID overflow!");
         self.0.set(Some(id));
         Tid::new(id)
-    }
-}
-
-// Reusing thread IDs doesn't work under loom, since this `Drop` impl results in
-// an access to a `loom` lazy_static while the test is shutting down, which
-// panics. T_T
-// Just skip TID reuse and use loom's lazy_static macro to ensure we have a
-// clean initial TID on every iteration, instead.
-#[cfg(not(loom))]
-impl Drop for Registration {
-    fn drop(&mut self) {
-        if let Some(id) = self.0.get() {
-            if let Ok(mut free) = REGISTRY.free.lock() {
-                free.push_back(id);
-            }
-        }
     }
 }
