@@ -1,4 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use std::time::{Duration, Instant};
 
 fn clear(c: &mut Criterion) {
     let mut group = c.benchmark_group("clear");
@@ -32,8 +33,51 @@ fn clear(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    group.bench_function("string", |b| {
+        b.iter_batched(
+            || String::from("hello world"),
+            |guard| {
+                drop(guard);
+            },
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 
-criterion_group!(clear_remove, clear);
-criterion_main!(clear_remove);
+fn push_str(c: &mut Criterion) {
+    let mut group = c.benchmark_group("push_str");
+
+    let pool = sharded_slab::Pool::<String>::new();
+
+    group.bench_function("pool", |b| {
+        b.iter_custom(|iters| {
+            let mut elapsed = Duration::from_secs(0);
+            for _ in 0..iters {
+                let now = Instant::now();
+                let mut string = pool.create().unwrap();
+                string.push_str("hello world");
+                elapsed += now.elapsed();
+                string.clear_on_drop();
+                drop(string);
+            }
+            elapsed
+        });
+    });
+    group.bench_function("string", |b| {
+        b.iter_custom(|iters| {
+            let mut elapsed = Duration::from_secs(0);
+            for _ in 0..iters {
+                let now = Instant::now();
+                let mut string = String::new();
+                string.push_str("hello world");
+                elapsed += now.elapsed();
+                drop(string);
+            }
+            elapsed
+        });
+    });
+    group.finish();
+}
+criterion_group!(benches, clear, push_str);
+criterion_main!(benches);
