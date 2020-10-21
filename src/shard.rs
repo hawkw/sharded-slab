@@ -67,7 +67,6 @@ impl<T, C> Shard<T, C>
 where
     C: cfg::Config,
 {
-    #[inline(always)]
     pub(crate) fn with_slot<'a, U>(
         &'a self,
         idx: usize,
@@ -77,11 +76,7 @@ where
         let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> {:?}", addr);
-        if page_index > self.shared.len() {
-            return None;
-        }
-
-        self.shared[page_index].with_slot(addr, f)
+        self.shared.get(page_index)?.with_slot(addr, f)
     }
 
     pub(crate) fn new(tid: usize) -> Self {
@@ -167,7 +162,7 @@ where
     ) -> Option<U> {
         // Can we fit the value into an exist`ing page?
         for (page_idx, page) in self.shared.iter().enumerate() {
-            let local = self.local(page_idx);
+            let local = self.local.get(page_idx)?;
 
             test_println!("-> page {}; {:?}; {:?}", page_idx, local, page);
 
@@ -242,7 +237,6 @@ where
 
     #[inline(always)]
     fn local(&self, i: usize) -> &page::Local {
-        #[cfg(debug_assertions)]
         debug_assert_eq!(
             Tid::<C>::current().as_usize(),
             self.tid,
@@ -287,17 +281,21 @@ where
         self.shards.get(idx)?.load(Acquire)
     }
 
-    #[inline]
     pub(crate) fn current<'a>(&'a self) -> (Tid<C>, &'a Shard<T, C>) {
         let tid = Tid::<C>::current();
         test_println!("current: {:?}", tid);
         let idx = tid.as_usize();
+        let shard_ptr = &self.shards[idx];
         // It's okay for this to be relaxed. The value is only ever stored by
         // the thread that corresponds to the index, and we are that thread.
-        let shard = self.shards[idx].load(Relaxed).unwrap_or_else(|| {
-            let ptr = Box::into_raw(Box::new(alloc::Track::new(Shard::new(idx))));
-            test_println!("-> allocated new shard for index {} at {:p}", idx, ptr);
-            self.shards[idx].set(ptr);
+        let shard = shard_ptr.load(Relaxed).unwrap_or_else(|| {
+            let new_shard = Box::into_raw(Box::new(alloc::Track::new(Shard::new(idx))));
+            test_println!(
+                "-> allocated new shard for index {} at {:p}",
+                idx,
+                new_shard
+            );
+            shard_ptr.set(new_shard);
             let mut max = self.max.load(Acquire);
             while max < idx {
                 match self.max.compare_exchange(max, idx, AcqRel, Acquire) {
@@ -308,7 +306,7 @@ where
             test_println!("-> highest index={}, prev={}", std::cmp::max(max, idx), max);
             unsafe {
                 // Safety: we just put it there!
-                &*ptr
+                &*new_shard
             }
             .get_ref()
         });
@@ -391,11 +389,13 @@ impl<T, C: cfg::Config> Ptr<T, C> {
         Some(track.get_ref())
     }
 
-    #[inline]
     fn set(&self, new: *mut alloc::Track<Shard<T, C>>) {
+        #[cfg(debug_assertions)]
         self.0
             .compare_exchange(ptr::null_mut(), new, AcqRel, Acquire)
             .expect("a shard can only be inserted by the thread that owns it, this is a bug!");
+        #[cfg(not(debug_assertions))]
+        self.0.store(new, Release)
     }
 }
 
