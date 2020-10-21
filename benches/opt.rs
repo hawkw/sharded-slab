@@ -42,6 +42,15 @@ fn clear(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+    group.bench_function("arc_string", |b| {
+        b.iter_batched(
+            || std::sync::Arc::new(String::from("hello world")),
+            |guard| {
+                drop(guard);
+            },
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 
