@@ -1,6 +1,6 @@
 pub(crate) use self::inner::*;
 
-#[cfg(loom)]
+#[cfg(all(loom, any(test, feature = "loom")))]
 mod inner {
     pub(crate) use loom::cell::UnsafeCell;
     pub(crate) use loom::lazy_static;
@@ -62,7 +62,7 @@ mod inner {
     }
 }
 
-#[cfg(not(loom))]
+#[cfg(not(all(loom, any(feature = "loom", test))))]
 mod inner {
     #![allow(dead_code)]
     pub(crate) use lazy_static::lazy_static;
