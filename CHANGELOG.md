@@ -1,3 +1,11 @@
+<a name="0.1.1"></a>
+## 0.1.1 (2021-1-4)
+
+
+#### Bug Fixes
+
+* change `loom` to an optional dependency ([9bd442b5](https://github.com/hawkw/sharded-slab/commit/9bd442b57bc56153a67d7325144ebcf303e0fe98))
+
 <a name="0.1.0"></a>
 ## 0.1.0 (2020-10-20)
 
