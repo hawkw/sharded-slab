@@ -13,7 +13,7 @@
 //! First, add this to your `Cargo.toml`:
 //!
 //! ```toml
-//! sharded-slab = "0.1.0"
+//! sharded-slab = "0.1.1"
 //! ```
 //!
 //! This crate provides two  types, [`Slab`] and [`Pool`], which provide
@@ -199,7 +199,7 @@
 //! See [this page](implementation/index.html) for details on this crate's design
 //! and implementation.
 //!
-#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.1")]
 #![warn(missing_debug_implementations, missing_docs, missing_doc_code_examples)]
 
 macro_rules! test_println {
