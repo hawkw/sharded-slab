@@ -24,6 +24,9 @@ harness = false
 [dependencies]
 lazy_static = "1"
 
+[build-dependencies]
+autocfg = "1"
+
 [dev-dependencies]
 loom = { version = "0.4", features = ["checkpoint"] }
 proptest = "0.10"

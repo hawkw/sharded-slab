@@ -51,7 +51,10 @@ pub(crate) struct Shard<T, C: cfg::Config> {
 }
 
 pub(crate) struct Array<T, C: cfg::Config> {
+    #[cfg(not(has_const_generics))]
     shards: Box<[Ptr<T, C>]>,
+    #[cfg(has_const_generics)]
+    shards: [Ptr<T, C>; C::MAX_SHARDS],
     max: AtomicUsize,
 }
 
