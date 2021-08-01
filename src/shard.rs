@@ -73,7 +73,7 @@ where
         idx: usize,
         f: impl FnOnce(&'a page::Slot<T, C>) -> Option<U>,
     ) -> Option<U> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> {:?}", addr);
@@ -105,7 +105,7 @@ where
 {
     /// Remove an item on the shard's local thread.
     pub(crate) fn take_local(&self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> remove_local {:?}", addr);
@@ -117,7 +117,7 @@ where
 
     /// Remove an item, while on a different thread from the shard's local thread.
     pub(crate) fn take_remote(&self, idx: usize) -> Option<T> {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         debug_assert!(Tid::<C>::current().as_usize() != self.tid);
 
         let (addr, page_index) = page::indices::<C>(idx);
@@ -129,7 +129,7 @@ where
     }
 
     pub(crate) fn remove_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -140,7 +140,7 @@ where
     }
 
     pub(crate) fn remove_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -180,7 +180,7 @@ where
     }
 
     pub(crate) fn mark_clear_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -191,7 +191,7 @@ where
     }
 
     pub(crate) fn mark_clear_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -218,7 +218,7 @@ where
     }
 
     fn clear_local(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -229,7 +229,7 @@ where
     }
 
     fn clear_remote(&self, idx: usize) -> bool {
-        debug_assert_eq!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
+        debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
         if page_index > self.shared.len() {
@@ -243,7 +243,7 @@ where
     #[inline(always)]
     fn local(&self, i: usize) -> &page::Local {
         #[cfg(debug_assertions)]
-        debug_assert_eq!(
+        debug_assert_eq_in_drop!(
             Tid::<C>::current().as_usize(),
             self.tid,
             "tried to access local data from another thread!"
