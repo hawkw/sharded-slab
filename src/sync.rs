@@ -2,15 +2,13 @@ pub(crate) use self::inner::*;
 
 #[cfg(all(loom, any(test, feature = "loom")))]
 mod inner {
-    pub(crate) use loom::cell::UnsafeCell;
-    pub(crate) use loom::lazy_static;
-    pub(crate) use loom::sync::Mutex;
     pub(crate) mod atomic {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::thread::yield_now;
-    pub(crate) use loom::thread_local;
+    pub(crate) use loom::{
+        cell::UnsafeCell, hint, lazy_static, sync::Mutex, thread::yield_now, thread_local,
+    };
 
     pub(crate) mod alloc {
         #![allow(dead_code)]
@@ -66,9 +64,12 @@ mod inner {
 mod inner {
     #![allow(dead_code)]
     pub(crate) use lazy_static::lazy_static;
-    pub(crate) use std::sync::{atomic, Mutex};
-    pub(crate) use std::thread::yield_now;
-    pub(crate) use std::thread_local;
+    pub(crate) use std::{
+        hint,
+        sync::{atomic, Mutex},
+        thread::yield_now,
+        thread_local,
+    };
 
     #[derive(Debug)]
     pub(crate) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
