@@ -12,6 +12,7 @@ use std::{
     collections::VecDeque,
     fmt,
     marker::PhantomData,
+    sync::PoisonError,
 };
 
 /// Uniquely identifies a thread.
@@ -138,10 +139,10 @@ impl Registration {
     #[inline(always)]
     fn current<C: cfg::Config>(&self) -> Tid<C> {
         if let Some(tid) = self.0.get().map(Tid::new) {
-            tid
-        } else {
-            self.register()
+            return tid;
         }
+
+        self.register()
     }
 
     #[cold]
@@ -157,8 +158,21 @@ impl Registration {
                     None
                 }
             })
-            .unwrap_or_else(|| REGISTRY.next.fetch_add(1, Ordering::AcqRel));
-        debug_assert!(id <= Tid::<C>::BITS, "thread ID overflow!");
+            .unwrap_or_else(|| {
+                let id = REGISTRY.next.fetch_add(1, Ordering::AcqRel);
+                if id > Tid::<C>::BITS {
+                    panic_in_drop!(
+                        "creating a new thread ID ({}) would exceed the \
+                        maximum number of thread ID bits specified in {} \
+                        ({})",
+                        id,
+                        std::any::type_name::<C>(),
+                        Tid::<C>::BITS,
+                    );
+                }
+                id
+            });
+
         self.0.set(Some(id));
         Tid::new(id)
     }
@@ -173,9 +187,8 @@ impl Registration {
 impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(id) = self.0.get() {
-            if let Ok(mut free) = REGISTRY.free.lock() {
-                free.push_back(id);
-            }
+            let mut free_list = REGISTRY.free.lock().unwrap_or_else(PoisonError::into_inner);
+            free_list.push_back(id);
         }
     }
 }
