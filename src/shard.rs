@@ -151,7 +151,7 @@ where
         shared.remove(addr, C::unpack_gen(idx), shared.free_list())
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> std::slice::Iter<'a, page::Shared<Option<T>, C>> {
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, page::Shared<Option<T>, C>> {
         self.shared.iter()
     }
 }
@@ -282,13 +282,13 @@ where
     }
 
     #[inline]
-    pub(crate) fn get<'a>(&'a self, idx: usize) -> Option<&'a Shard<T, C>> {
+    pub(crate) fn get(&self, idx: usize) -> Option<&Shard<T, C>> {
         test_println!("-> get shard={}", idx);
         self.shards.get(idx)?.load(Acquire)
     }
 
     #[inline]
-    pub(crate) fn current<'a>(&'a self) -> (Tid<C>, &'a Shard<T, C>) {
+    pub(crate) fn current(&self) -> (Tid<C>, &Shard<T, C>) {
         let tid = Tid::<C>::current();
         test_println!("current: {:?}", tid);
         let idx = tid.as_usize();
