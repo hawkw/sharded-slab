@@ -228,24 +228,28 @@ macro_rules! test_dbg {
     };
 }
 
-mod clear;
 pub mod implementation;
-mod page;
 pub mod pool;
-pub(crate) mod sync;
-mod tid;
-pub(crate) use tid::Tid;
+
 pub(crate) mod cfg;
+pub(crate) mod sync;
+
+mod clear;
 mod iter;
+mod page;
 mod shard;
-use cfg::CfgPrivate;
+mod tid;
+
 pub use cfg::{Config, DefaultConfig};
 pub use clear::Clear;
 #[doc(inline)]
 pub use pool::Pool;
+
+pub(crate) use tid::Tid;
+
+use cfg::CfgPrivate;
 use shard::Shard;
-use std::ptr;
-use std::{fmt, marker::PhantomData, sync::Arc};
+use std::{fmt, marker::PhantomData, ptr, sync::Arc};
 
 /// A sharded slab.
 ///
