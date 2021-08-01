@@ -1,3 +1,17 @@
+<a name="0.1.2"></a>
+### 0.1.2 (2021-08-01)
+
+
+#### Bug Fixes
+
+*   make debug assertions drop safe ([26d35a69](https://github.com/hawkw/sharded-slab/commit/26d35a695c9e5d7c62ab07cc5e66a0c6f8b6eade))
+
+#### Features
+
+*   improve panics on thread ID bit exhaustion ([9ecb8e61](https://github.com/hawkw/sharded-slab/commit/9ecb8e614f107f68b5c6ba770342ae72af1cd07b))
+
+
+
 <a name="0.1.1"></a>
 ## 0.1.1 (2021-1-4)
 
