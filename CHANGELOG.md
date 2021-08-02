@@ -5,6 +5,7 @@
 #### Bug Fixes
 
 *   set up MSRV in CI (#61) ([dfcc9080](https://github.com/hawkw/sharded-slab/commit/dfcc9080a62d08e359f298a9ffb0f275928b83e4), closes [#60](https://github.com/hawkw/sharded-slab/issues/60))
+* **tests:**  duplicate `hint` mod defs with loom ([0ce3fd91](https://github.com/hawkw/sharded-slab/commit/0ce3fd91feac8b4edb4f1ece6aebfc4ba4e50026))
 
 
 
