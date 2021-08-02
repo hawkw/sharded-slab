@@ -1,3 +1,13 @@
+<a name="v0.1.3"></a>
+### v0.1.3 (2021-08-02)
+
+
+#### Bug Fixes
+
+*   set up MSRV in CI (#61) ([dfcc9080](https://github.com/hawkw/sharded-slab/commit/dfcc9080a62d08e359f298a9ffb0f275928b83e4), closes [#60](https://github.com/hawkw/sharded-slab/issues/60))
+
+
+
 <a name="0.1.2"></a>
 ### 0.1.2 (2021-08-01)
 

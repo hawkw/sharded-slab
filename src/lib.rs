@@ -199,7 +199,7 @@
 //! See [this page](implementation/index.html) for details on this crate's design
 //! and implementation.
 //!
-#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.2")]
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.3")]
 #![warn(missing_debug_implementations, missing_docs, missing_doc_code_examples)]
 
 #[macro_use]
