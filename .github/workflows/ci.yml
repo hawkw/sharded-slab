@@ -11,6 +11,7 @@ jobs:
         rust:
           - stable
           - nightly
+          - 1.42.0
     steps:
       - uses: actions/checkout@master
       - name: Install toolchain
@@ -97,4 +98,3 @@ jobs:
         with:
           command: fmt
           args: -- --check
-

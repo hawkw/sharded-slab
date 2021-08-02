@@ -10,6 +10,10 @@ mod inner {
         cell::UnsafeCell, hint, lazy_static, sync::Mutex, thread::yield_now, thread_local,
     };
 
+    pub(crate) mod hint {
+        pub(crate) use super::hint::spin_loop_hint as spin_loop;
+    }
+
     pub(crate) mod alloc {
         #![allow(dead_code)]
         use loom::alloc;
@@ -65,11 +69,18 @@ mod inner {
     #![allow(dead_code)]
     pub(crate) use lazy_static::lazy_static;
     pub(crate) use std::{
-        hint,
         sync::{atomic, Mutex},
         thread::yield_now,
         thread_local,
     };
+
+    pub(crate) mod hint {
+        #[inline(always)]
+        pub(crate) fn spin_loop() { // MSRV: std::hint::spin_loop() stabilized in 1.49.0
+            #[allow(deprecated)]
+            super::atomic::spin_loop_hint()
+        }
+    }
 
     #[derive(Debug)]
     pub(crate) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
