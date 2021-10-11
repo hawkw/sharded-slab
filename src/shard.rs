@@ -293,7 +293,7 @@ where
         test_println!("current: {:?}", tid);
         let idx = tid.as_usize();
         assert!(
-            idx >= self.shards.len(),
+            idx < self.shards.len(),
             "Thread count overflowed the configured max count. \
             Thread index = {}, max threads = {}.",
             idx,
