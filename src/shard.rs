@@ -292,6 +292,13 @@ where
         let tid = Tid::<C>::current();
         test_println!("current: {:?}", tid);
         let idx = tid.as_usize();
+        assert!(
+            idx < self.shards.len(),
+            "Thread count overflowed the configured max count. \
+            Thread index = {}, max threads = {}.",
+            idx,
+            C::MAX_SHARDS,
+        );
         // It's okay for this to be relaxed. The value is only ever stored by
         // the thread that corresponds to the index, and we are that thread.
         let shard = self.shards[idx].load(Relaxed).unwrap_or_else(|| {
