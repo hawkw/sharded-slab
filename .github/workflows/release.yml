@@ -14,6 +14,9 @@ jobs:
         with:
           # Path to changelog.
           changelog: CHANGELOG.md
+          # Reject releases from commits not contained in branches
+          # that match the specified pattern (regular expression)
+          branch: main
         env:
           # (Required) GitHub token for creating GitHub Releases.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
