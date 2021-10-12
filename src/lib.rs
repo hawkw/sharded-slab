@@ -198,13 +198,11 @@
 //! and implementation.
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.3")]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    rustdoc::missing_doc_code_examples,
-    rustdoc::broken_intra_doc_links
+#![warn(missing_debug_implementations, missing_docs)]
+#![cfg_attr(
+    docsrs,
+    warn(rustdoc::missing_doc_code_examples, rustdoc::broken_intra_doc_links)
 )]
-
 #[macro_use]
 mod macros;
 
