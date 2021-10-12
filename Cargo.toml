@@ -32,3 +32,7 @@ slab = "0.4.2"
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = ["checkpoint"], optional = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
