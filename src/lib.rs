@@ -36,12 +36,10 @@
 //! [`Pool`] may be used to reuse a set of existing heap allocations, reducing
 //! allocator load.
 //!
-//! [`Slab`]: struct.Slab.html
-//! [inserting]: struct.Slab.html#method.insert
-//! [taking]: struct.Slab.html#method.take
-//! [`Pool`]: struct.Pool.html
-//! [create]: struct.Pool.html#method.create
-//! [cleared]: trait.Clear.html
+//! [inserting]: Slab::insert
+//! [taking]: Slab::take
+//! [create]: Pool::create
+//! [cleared]: Clear
 //! [object pool]: https://en.wikipedia.org/wiki/Object_pool_pattern
 //!
 //! # Examples
@@ -196,11 +194,16 @@
 //!
 //! # Implementation Notes
 //!
-//! See [this page](implementation/index.html) for details on this crate's design
+//! See [this page](crate::implementation) for details on this crate's design
 //! and implementation.
 //!
 #![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.3")]
-#![warn(missing_debug_implementations, missing_docs, missing_doc_code_examples)]
+#![warn(
+    missing_debug_implementations,
+    missing_docs,
+    rustdoc::missing_doc_code_examples,
+    rustdoc::broken_intra_doc_links
+)]
 
 #[macro_use]
 mod macros;
@@ -230,17 +233,18 @@ use std::{fmt, marker::PhantomData, ptr, sync::Arc};
 
 /// A sharded slab.
 ///
-/// See the [crate-level documentation](index.html) for details on using this type.
+/// See the [crate-level documentation](crate) for details on using this type.
 pub struct Slab<T, C: cfg::Config = DefaultConfig> {
     shards: shard::Array<Option<T>, C>,
     _cfg: PhantomData<C>,
 }
 
-/// A handle that allows access to an object in a slab.
+/// A handle that allows access to an occupied entry in a [`Slab`].
 ///
 /// While the guard exists, it indicates to the slab that the item the guard
 /// references is currently being accessed. If the item is removed from the slab
-/// while a guard exists, the removal will be deferred until all guards are dropped.
+/// while a guard exists, the removal will be deferred until all guards are
+/// dropped.
 pub struct Entry<'a, T, C: cfg::Config = DefaultConfig> {
     inner: page::slot::Guard<Option<T>, C>,
     value: ptr::NonNull<T>,
@@ -248,7 +252,7 @@ pub struct Entry<'a, T, C: cfg::Config = DefaultConfig> {
     key: usize,
 }
 
-/// A handle to a vacant entry in a `Slab`.
+/// A handle to a vacant entry in a [`Slab`].
 ///
 /// `VacantEntry` allows constructing values with the key that they will be
 /// assigned to.
@@ -277,13 +281,14 @@ pub struct VacantEntry<'a, T, C: cfg::Config = DefaultConfig> {
     _lt: PhantomData<&'a ()>,
 }
 
-/// An owned guard that allows access to an object in a `S.ab`.
+/// An owned reference to an occupied entry in a [`Slab`].
 ///
-/// While the guard exists, it indicates to the slab that the item the guard references is
-/// currently being accessed. If the item is removed from the slab while the guard exists, the
-/// removal will be deferred until all guards are dropped.
+/// While the guard exists, it indicates to the slab that the item the guard
+/// references is currently being accessed. If the item is removed from the slab
+/// while the guard exists, the  removal will be deferred until all guards are
+/// dropped.
 ///
-/// Unlike [`Entry`], which borrows the slab, an `OwnedEntry` clones the `Arc`
+/// Unlike [`Entry`], which borrows the slab, an `OwnedEntry` clones the [`Arc`]
 /// around the slab. Therefore, it keeps the slab from being dropped until all
 /// such guards have been dropped. This means that an `OwnedEntry` may be held for
 /// an arbitrary lifetime.
@@ -358,10 +363,7 @@ pub struct VacantEntry<'a, T, C: cfg::Config = DefaultConfig> {
 /// ```
 ///
 /// [`get`]: Slab::get
-/// [`OwnedEntry`]: crate::OwnedEntry
-/// [`Entry`]: crate::Entry
-///
-/// [`Entry`]: crate::Entry
+/// [`Arc`]: std::sync::Arc
 pub struct OwnedEntry<T, C = DefaultConfig>
 where
     C: cfg::Config,
@@ -399,13 +401,11 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// parameters. By default, all bits are used; this can be changed by
     /// overriding the [`Config::RESERVED_BITS`][res] constant.
     ///
-    /// [`Config`]: trait.Config.html
-    /// [res]: trait.Config.html#associatedconstant.RESERVED_BITS
-    /// [`Slab::insert`]: struct.Slab.html#method.insert
+    /// [res]: crate::Config#RESERVED_BITS
     pub const USED_BITS: usize = C::USED_BITS;
 
-    /// Inserts a value into the slab, returning a key that can be used to
-    /// access it.
+    /// Inserts a value into the slab, returning the integer index at which that
+    /// value was inserted. This index can then be used to access the entry.
     ///
     /// If this function returns `None`, then the shard for the current thread
     /// is full and no items can be added until some are removed, or the maximum
@@ -434,8 +434,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// Return a handle to a vacant entry allowing for further manipulation.
     ///
     /// This function is useful when creating values that must contain their
-    /// slab key. The returned `VacantEntry` reserves a slot in the slab and is
-    /// able to query the associated key.
+    /// slab index. The returned [`VacantEntry`] reserves a slot in the slab and
+    /// is able to return the index of the entry.
     ///
     /// # Examples
     ///
@@ -468,8 +468,8 @@ impl<T, C: cfg::Config> Slab<T, C> {
         })
     }
 
-    /// Remove the value associated with the given key from the slab, returning
-    /// `true` if a value was removed.
+    /// Remove the value at the given index in the slab, returning `true` if a
+    /// value was removed.
     ///
     /// Unlike [`take`], this method does _not_ block the current thread until
     /// the value can be removed. Instead, if another thread is currently
@@ -579,7 +579,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// thread2.join().unwrap();
     /// assert!(!slab.contains(key));
     /// ```
-    /// [`remove`]: #method.remove
+    /// [`remove`]: #remove
     pub fn take(&self, idx: usize) -> Option<T> {
         let tid = C::unpack_tid(idx);
 
@@ -624,12 +624,12 @@ impl<T, C: cfg::Config> Slab<T, C> {
         })
     }
 
-    /// Return an owned reference to the value associated with the given key.
+    /// Return an owned reference to the value at the given index.
     ///
     /// If the slab does not contain a value for the given key, `None` is
     /// returned instead.
     ///
-    /// Unlike [`get`], which borrows the slab, this method _clones_ the `Arc`
+    /// Unlike [`get`], which borrows the slab, this method _clones_ the [`Arc`]
     /// around the slab. This means that the returned [`OwnedEntry`] can be held
     /// for an arbitrary lifetime. However,  this method requires that the slab
     /// itself be wrapped in an `Arc`.
@@ -685,7 +685,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// function_requiring_static(&my_struct);
     /// ```
     ///
-    /// `OwnedEntry`s may be sent between threads:
+    /// [`OwnedEntry`]s may be sent between threads:
     ///
     /// ```
     /// # use sharded_slab::Slab;
@@ -704,8 +704,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// ```
     ///
     /// [`get`]: Slab::get
-    /// [`OwnedEntry`]: crate::OwnedEntry
-    /// [`Entry`]: crate::Entry
+    /// [`Arc`]: std::sync::Arc
     pub fn get_owned(self: Arc<Self>, key: usize) -> Option<OwnedEntry<T, C>> {
         let tid = C::unpack_tid(key);
 
@@ -841,8 +840,8 @@ where
 impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
     /// Insert a value in the entry.
     ///
-    /// To get the key associated with the value, use `key` prior to calling
-    /// `insert`.
+    /// To get the integer index at which this value will be inserted, use
+    /// [`key`] prior to calling `insert`.
     ///
     /// # Examples
     ///
@@ -884,7 +883,7 @@ impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
         )
     }
 
-    /// Return the key associated with this entry.
+    /// Return the integer index at which this entry will be inserted.
     ///
     /// A value stored in this entry will be associated with this key.
     ///

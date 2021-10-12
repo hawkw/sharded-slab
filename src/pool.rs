@@ -74,13 +74,13 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 /// Both `Pool` and [`Slab`] share the same configuration mechanism. See [crate level documentation][config-doc]
 /// for more details.
 ///
-/// [`Slab::take`]: ../struct.Slab.html#method.take
-/// [`Slab::insert`]: ../struct.Slab.html#method.insert
-/// [`Pool::create`]: struct.Pool.html#method.create
-/// [`Pool::clear`]: struct.Pool.html#method.clear
-/// [config-doc]: ../index.html#configuration
-/// [`Clear`]: trait.Clear.html
-/// [`Slab`]: struct.Slab.html
+/// [`Slab::take`]: crate::Slab::take
+/// [`Slab::insert`]: crate::Slab::insert
+/// [`Pool::create`]: Pool::create
+/// [`Pool::clear`]: Pool::clear
+/// [config-doc]: crate#configuration
+/// [`Clear`]: crate::Clear
+/// [`Slab`]: crate::Slab
 pub struct Pool<T, C = DefaultConfig>
 where
     T: Clear + Default,
@@ -447,7 +447,7 @@ where
     /// }).join().unwrap();
     /// ```
     ///
-    /// [`RefMut`]: pool/struct.RefMut.html
+    /// [`RefMut`]: crate::pool::RefMut
     pub fn create(&self) -> Option<RefMut<'_, T, C>> {
         let (tid, shard) = self.shards.current();
         test_println!("pool: create {:?}", tid);
