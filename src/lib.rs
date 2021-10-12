@@ -203,7 +203,12 @@
 #[macro_use]
 mod macros;
 
-pub mod implementation;
+#[cfg_attr(docsrs, doc = include_str!("../IMPLEMENTATION.md"))]
+#[cfg_attr(not(docsrs), allow(missing_docs))]
+pub mod implementation {
+    // This module exists only to provide a separate page for the implementation
+    // documentation.
+}
 pub mod pool;
 
 pub(crate) mod cfg;
@@ -505,7 +510,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// thread2.join().unwrap();
     /// assert!(!slab.contains(key));
     /// ```
-    /// [`take`]: #method.take
+    /// [`take`]: Slab::take
     pub fn remove(&self, idx: usize) -> bool {
         // The `Drop` impl for `Entry` calls `remove_local` or `remove_remote` based
         // on where the guard was dropped from. If the dropped guard was the last one, this will
@@ -574,7 +579,7 @@ impl<T, C: cfg::Config> Slab<T, C> {
     /// thread2.join().unwrap();
     /// assert!(!slab.contains(key));
     /// ```
-    /// [`remove`]: #remove
+    /// [`remove`]: Slab::remove
     pub fn take(&self, idx: usize) -> Option<T> {
         let tid = C::unpack_tid(idx);
 
@@ -855,6 +860,8 @@ impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
     /// assert_eq!(hello, slab.get(hello).unwrap().0);
     /// assert_eq!("hello", slab.get(hello).unwrap().1);
     /// ```
+    ///
+    /// [`key`]: VacantEntry::key
     pub fn insert(mut self, val: T) {
         let value = unsafe {
             // Safety: this `VacantEntry` only lives as long as the `Slab` it was
