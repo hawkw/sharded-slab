@@ -203,12 +203,7 @@
 #[macro_use]
 mod macros;
 
-#[cfg_attr(docsrs, doc = include_str!("../IMPLEMENTATION.md"))]
-#[cfg_attr(not(docsrs), allow(missing_docs))]
-pub mod implementation {
-    // This module exists only to provide a separate page for the implementation
-    // documentation.
-}
+pub mod implementation;
 pub mod pool;
 
 pub(crate) mod cfg;
