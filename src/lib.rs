@@ -197,7 +197,7 @@
 //! See [this page](crate::implementation) for details on this crate's design
 //! and implementation.
 //!
-#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.3")]
+#![doc(html_root_url = "https://docs.rs/sharded-slab/0.1.4")]
 #![warn(missing_debug_implementations, missing_docs)]
 #![cfg_attr(docsrs, warn(rustdoc::broken_intra_doc_links))]
 #[macro_use]

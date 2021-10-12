@@ -1,5 +1,15 @@
-<a name="v0.1.3"></a>
-### v0.1.3 (2021-08-02)
+<a name="0.1.4"></a>
+### 0.1.4 (2021-10-12)
+
+
+#### Features
+
+*   emit a nicer panic when thread count overflows `MAX_SHARDS` (#64) ([f1ed058a](https://github.com/hawkw/sharded-slab/commit/f1ed058a3ee296eff033fc0fb88f62a8b2f83f10))
+
+
+
+<a name="0.1.3"></a>
+### 0.1.3 (2021-08-02)
 
 
 #### Bug Fixes
