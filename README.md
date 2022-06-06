@@ -127,7 +127,7 @@ assert_eq!(hello.as_str(), "hello everyone!");
 
 ## Comparison with Similar Crates
 
-- [`slab`]: Carl Lerche's `slab` crate provides a slab implementation with a
+- [`slab`][slab crate]: Carl Lerche's `slab` crate provides a slab implementation with a
   similar API, implemented by storing all data in a single vector.
 
   Unlike `sharded-slab`, inserting and removing elements from the slab requires
@@ -150,7 +150,7 @@ assert_eq!(hello.as_str(), "hello everyone!");
   concurrent use-cases, while `slab` should be preferred in single-threaded
   use-cases.
 
-[`slab`]: https://crates.io/crates/slab
+[slab crate]: https://crates.io/crates/slab
 
 ## Safety and Correctness
 
