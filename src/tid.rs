@@ -3,7 +3,7 @@ use crate::{
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local, Mutex,
     },
     Pack,
 };
@@ -14,6 +14,7 @@ use std::{
     marker::PhantomData,
     sync::PoisonError,
 };
+use once_cell::sync::Lazy;
 
 /// Uniquely identifies a thread.
 pub(crate) struct Tid<C> {
@@ -27,15 +28,13 @@ struct Registration(Cell<Option<usize>>);
 
 struct Registry {
     next: AtomicUsize,
-    free: Mutex<VecDeque<usize>>,
+    free: Lazy<Mutex<VecDeque<usize>>>,
 }
 
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
+static REGISTRY: Registry = Registry {
+    next: AtomicUsize::new(0),
+    free: Lazy::new(|| Mutex::new(VecDeque::new())),
+};
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
