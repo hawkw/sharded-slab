@@ -63,7 +63,7 @@ mod inner {
 #[cfg(not(all(loom, any(feature = "loom", test))))]
 mod inner {
     #![allow(dead_code)]
-    pub(crate) use lazy_static::lazy_static;
+    pub(crate) use once_cell::sync::Lazy;
     pub(crate) use std::{
         sync::{atomic, Mutex},
         thread::yield_now,
