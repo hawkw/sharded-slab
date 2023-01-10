@@ -7,6 +7,7 @@ use crate::{
     },
     Pack,
 };
+use once_cell::sync::Lazy;
 use std::{
     cell::{Cell, UnsafeCell},
     collections::VecDeque,
@@ -14,7 +15,6 @@ use std::{
     marker::PhantomData,
     sync::PoisonError,
 };
-use once_cell::sync::Lazy;
 
 /// Uniquely identifies a thread.
 pub(crate) struct Tid<C> {
