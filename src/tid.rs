@@ -28,13 +28,13 @@ struct Registration(Cell<Option<usize>>);
 
 struct Registry {
     next: AtomicUsize,
-    free: Lazy<Mutex<VecDeque<usize>>>,
+    free: Mutex<VecDeque<usize>>,
 }
 
-static REGISTRY: Registry = Registry {
+static REGISTRY: Lazy<Registry> = Lazy::new(|| Registry {
     next: AtomicUsize::new(0),
-    free: Lazy::new(|| Mutex::new(VecDeque::new())),
-};
+    free: Mutex::new(VecDeque::new()),
+});
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
