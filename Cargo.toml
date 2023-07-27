@@ -22,7 +22,7 @@ name = "bench"
 harness = false
 
 [dependencies]
-lazy_static = "1"
+lazy_static = "1.1"
 
 [dev-dependencies]
 loom = { version = "0.5", features = ["checkpoint"] }
