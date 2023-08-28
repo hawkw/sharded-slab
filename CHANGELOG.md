@@ -1,3 +1,13 @@
+<a name="0.1.5"></a>
+## 0.1.5 (2023-08-28)
+
+
+#### Bug Fixes
+
+* **Slab:**  invalid generation in case of custom config (#80) ([ca090279](https://github.com/hawkw/sharded-slab/commit/ca09027944812d024676029a3dde62d27ef22015))
+
+
+
 <a name="0.1.4"></a>
 ### 0.1.4 (2021-10-12)
 
