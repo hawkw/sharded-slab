@@ -13,6 +13,16 @@ categories = ["memory-management", "data-structures", "concurrency"]
 description = """
 A lock-free concurrent slab.
 """
+ignore = [
+    "flake.nix",
+    "flake.lock",
+    ".envrc",
+    ".clog.toml",
+    ".cargo",
+    ".github",
+    ".direnv",
+    "bin",
+]
 
 [badges]
 maintenance = { status = "experimental" }
