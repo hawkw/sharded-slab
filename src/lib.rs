@@ -215,8 +215,11 @@ mod page;
 mod shard;
 mod tid;
 
-pub use cfg::{Config, DefaultConfig};
-pub use clear::Clear;
+pub use self::{
+    cfg::{Config, DefaultConfig},
+    clear::Clear,
+    iter::UniqueIter,
+};
 #[doc(inline)]
 pub use pool::Pool;
 
@@ -735,6 +738,10 @@ impl<T, C: cfg::Config> Slab<T, C> {
     }
 
     /// Returns an iterator over all the items in the slab.
+    ///
+    /// Because this iterator exclusively borrows the slab (i.e. it holds an
+    /// `&mut Slab<T>`), elements will not be added or removed while the
+    /// iteration is in progress.
     pub fn unique_iter(&mut self) -> iter::UniqueIter<'_, T, C> {
         let mut shards = self.shards.iter_mut();
         let shard = shards.next().expect("must be at least 1 shard");

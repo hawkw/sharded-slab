@@ -1,6 +1,8 @@
 use crate::{page, shard};
 use std::slice;
 
+/// An exclusive iterator over the items in a [`Slab`](crate::Slab).
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 #[derive(Debug)]
 pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
     pub(super) shards: shard::IterMut<'a, Option<T>, C>,
