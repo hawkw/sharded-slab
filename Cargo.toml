@@ -39,6 +39,7 @@ lazy_static = "1"
 proptest = "1"
 criterion = "0.3"
 slab = "0.4.2"
+memory-stats = "1"
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.5", features = ["checkpoint"], optional = true }
