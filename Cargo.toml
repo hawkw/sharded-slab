@@ -1,6 +1,6 @@
 [package]
 name = "sharded-slab"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
 edition = "2018"
 documentation = "https://docs.rs/sharded-slab/0.1.4/sharded_slab"
