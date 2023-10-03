@@ -247,7 +247,7 @@ where
     }
 
     pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
-        let slab = self.slab.with(|slab| unsafe { (&*slab).as_ref() });
+        let slab = self.slab.with(|slab| unsafe { (*slab).as_ref() });
         slab.map(|slab| {
             slab.iter()
                 .filter_map(Shared::make_ref as fn(&'a Slot<Option<T>, C>) -> Option<&'a T>)
@@ -402,7 +402,7 @@ impl<C: cfg::Config> Ord for Addr<C> {
 
 impl<C: cfg::Config> Clone for Addr<C> {
     fn clone(&self) -> Self {
-        Self::from_usize(self.addr)
+        *self
     }
 }
 
