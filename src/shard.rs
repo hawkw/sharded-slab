@@ -77,7 +77,7 @@ where
         let (addr, page_index) = page::indices::<C>(idx);
 
         test_println!("-> {:?}", addr);
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return None;
         }
 
@@ -132,7 +132,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
@@ -143,7 +143,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
@@ -183,7 +183,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
@@ -194,7 +194,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
@@ -221,7 +221,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
@@ -232,7 +232,7 @@ where
         debug_assert_eq_in_drop!(Tid::<C>::from_packed(idx).as_usize(), self.tid);
         let (addr, page_index) = page::indices::<C>(idx);
 
-        if page_index > self.shared.len() {
+        if page_index >= self.shared.len() {
             return false;
         }
 
