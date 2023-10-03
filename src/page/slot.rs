@@ -584,7 +584,7 @@ impl<C: cfg::Config> Ord for Generation<C> {
 
 impl<C: cfg::Config> Clone for Generation<C> {
     fn clone(&self) -> Self {
-        Self::new(self.value)
+        *self
     }
 }
 
@@ -748,7 +748,7 @@ impl<C: cfg::Config> Ord for RefCount<C> {
 
 impl<C: cfg::Config> Clone for RefCount<C> {
     fn clone(&self) -> Self {
-        Self::from_usize(self.value)
+        *self
     }
 }
 

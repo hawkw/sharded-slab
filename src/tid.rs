@@ -123,7 +123,7 @@ impl<C> Eq for Tid<C> {}
 
 impl<C: cfg::Config> Clone for Tid<C> {
     fn clone(&self) -> Self {
-        Self::new(self.id)
+        *self
     }
 }
 
