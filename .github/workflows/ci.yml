@@ -1,6 +1,9 @@
 name: CI
 
-on: [pull_request]
+on:
+  push:
+    branches: ["main"]
+  pull_request:
 
 env:
   RUSTFLAGS: -Dwarnings
@@ -57,7 +60,6 @@ jobs:
   test:
     name: Tests (stable)
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@master
       - name: Install toolchain
@@ -72,7 +74,6 @@ jobs:
   test-loom:
     name: Loom tests (stable)
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@master
       - name: Install toolchain
@@ -87,7 +88,6 @@ jobs:
   clippy:
     name: Clippy (stable)
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain
@@ -106,7 +106,6 @@ jobs:
   rustfmt:
     name: Rustfmt (stable)
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain
@@ -121,3 +120,16 @@ jobs:
         with:
           command: fmt
           args: -- --check
+
+  all-systems-go:
+    name: "all systems go!"
+    needs:
+      - build
+      - msrv
+      - test
+      - test-loom
+      - clippy
+      - rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 0
