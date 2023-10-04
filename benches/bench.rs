@@ -26,7 +26,7 @@ impl<T: Send + Sync + 'static> MultithreadedBench<T> {
         let end = self.end.clone();
         let slab = self.slab.clone();
         thread::spawn(move || {
-            f(&*start, &*slab);
+            f(&start, &*slab);
             end.wait();
         });
         self

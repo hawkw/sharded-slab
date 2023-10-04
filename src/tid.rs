@@ -12,7 +12,6 @@ use std::{
     collections::VecDeque,
     fmt,
     marker::PhantomData,
-    sync::PoisonError,
 };
 
 /// Uniquely identifies a thread.
@@ -186,6 +185,8 @@ impl Registration {
 #[cfg(not(all(loom, any(feature = "loom", test))))]
 impl Drop for Registration {
     fn drop(&mut self) {
+        use std::sync::PoisonError;
+
         if let Some(id) = self.0.get() {
             let mut free_list = REGISTRY.free.lock().unwrap_or_else(PoisonError::into_inner);
             free_list.push_back(id);
@@ -193,7 +194,7 @@ impl Drop for Registration {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 pub(crate) fn with<R>(tid: usize, f: impl FnOnce() -> R) -> R {
     struct Guard(Option<usize>);
 
