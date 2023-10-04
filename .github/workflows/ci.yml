@@ -9,7 +9,7 @@ env:
 
 jobs:
   build:
-    name: Build for ${{ matrix.target }} (${{ matrix.rust }})
+    name: Build ((${{ matrix.rust }}, ${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -55,7 +55,7 @@ jobs:
           RUSTFLAGS: "" # remove -Dwarnings
 
   test:
-    name: Tests (nightly)
+    name: Tests (stable)
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -64,13 +64,13 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: stable
           override: true
       - name: Run tests
         run: cargo test
 
   test-loom:
-    name: Loom tests (nightly)
+    name: Loom tests (stable)
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -79,7 +79,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: stable
           override: true
       - name: Run Loom tests
         run: ./bin/loom.sh
