@@ -1,3 +1,14 @@
+<a name="v0.1.7"></a>
+### v0.1.7 (2023-10-04)
+
+
+#### Bug Fixes
+
+*   index out of bounds in `get()` and `get_owned()` (#88) ([fdbc930f](https://github.com/hawkw/sharded-slab/commit/fdbc930fb14b0f6f8b77cd6efdad5a1bdf8d3c04))
+* **unique_iter:**  prevent panics if a slab is empty (#88) ([bd599e0b](https://github.com/hawkw/sharded-slab/commit/bd599e0b2a60a953f25f27ba1fa86682150e05c2), closes [#73](https://github.com/hawkw/sharded-slab/issues/73))
+
+
+
 <a name="0.1.6"></a>
 ## 0.1.6 (2023-09-27)
 
