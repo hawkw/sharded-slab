@@ -2,21 +2,25 @@ name: CI
 
 on: [pull_request]
 
+env:
+  RUSTFLAGS: -Dwarnings
+  RUST_BACKTRACE: 1
+  MSRV: 1.42.0
+
 jobs:
   build:
+    name: Build for ${{ matrix.target }} (${{ matrix.rust }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust:
           - stable
           - nightly
-          - 1.42.0
         target:
           - x86_64-unknown-linux-gnu
         include:
           - rust: stable
             target: i686-unknown-linux-musl
-    name: cargo +${{ matrix.rust }} build --target ${{ matrix.target }}
     steps:
       - uses: actions/checkout@master
       - name: Install toolchain
@@ -32,13 +36,30 @@ jobs:
           command: build
           args: --all-targets --target ${{ matrix.target }}
 
+  msrv:
+    name: Build (MSRV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.MSRV }}
+          override: true
+      - name: cargo +${{ env.MSRV }} build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+        env:
+          RUSTFLAGS: "" # remove -Dwarnings
+
   test:
-    name: Tests
+    name: Tests (nightly)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@master
-
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -49,13 +70,11 @@ jobs:
         run: cargo test
 
   test-loom:
-    name: Loom tests
+    name: Loom tests (nightly)
     runs-on: ubuntu-latest
     needs: build
-
     steps:
       - uses: actions/checkout@master
-
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -65,10 +84,10 @@ jobs:
       - name: Run Loom tests
         run: ./bin/loom.sh
 
-  clippy_check:
+  clippy:
+    name: Clippy (stable)
     runs-on: ubuntu-latest
     needs: build
-
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain
@@ -78,17 +97,16 @@ jobs:
           toolchain: stable
           components: clippy
           override: true
-      - name: Run clippy
+      - name: cargo clippy --all-targets --all-features
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+          args: --all-targets --all-features
 
   rustfmt:
-    name: rustfmt
+    name: Rustfmt (stable)
     runs-on: ubuntu-latest
     needs: build
-
     steps:
       - uses: actions/checkout@v2
       - name: Install toolchain
