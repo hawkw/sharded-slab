@@ -3,7 +3,7 @@ use crate::{
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local, Mutex,
     },
     Pack,
 };
@@ -29,12 +29,10 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
+static REGISTRY: Registry = Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+};
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
@@ -177,12 +175,6 @@ impl Registration {
     }
 }
 
-// Reusing thread IDs doesn't work under loom, since this `Drop` impl results in
-// an access to a `loom` lazy_static while the test is shutting down, which
-// panics. T_T
-// Just skip TID reuse and use loom's lazy_static macro to ensure we have a
-// clean initial TID on every iteration, instead.
-#[cfg(not(all(loom, any(feature = "loom", test))))]
 impl Drop for Registration {
     fn drop(&mut self) {
         use std::sync::PoisonError;

@@ -7,7 +7,7 @@ documentation = "https://docs.rs/sharded-slab/"
 homepage = "https://github.com/hawkw/sharded-slab"
 repository = "https://github.com/hawkw/sharded-slab"
 readme = "README.md"
-rust-version = "1.42.0"
+rust-version = "1.68.0"
 license = "MIT"
 keywords = ["slab", "allocator", "lock-free", "atomic"]
 categories = ["memory-management", "data-structures", "concurrency"]
@@ -31,9 +31,6 @@ maintenance = { status = "experimental" }
 [[bench]]
 name = "bench"
 harness = false
-
-[dependencies]
-lazy_static = "1"
 
 [dev-dependencies]
 proptest = "1"
