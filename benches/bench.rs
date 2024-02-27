@@ -93,7 +93,6 @@ fn insert_remove_local(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("slab_biglock", i), i, |b, &i| {
             b.iter_custom(|iters| {
                 let mut total = Duration::from_secs(0);
-                let i = i;
                 for _ in 0..iters {
                     let bench = MultithreadedBench::new(Arc::new(RwLock::new(slab::Slab::new())));
                     let elapsed = bench

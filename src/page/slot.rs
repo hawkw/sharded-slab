@@ -572,7 +572,7 @@ impl<C: cfg::Config> Eq for Generation<C> {}
 
 impl<C: cfg::Config> PartialOrd for Generation<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.value.partial_cmp(&other.value)
+        Some(self.cmp(other))
     }
 }
 
@@ -736,7 +736,7 @@ impl<C: cfg::Config> Eq for RefCount<C> {}
 
 impl<C: cfg::Config> PartialOrd for RefCount<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.value.partial_cmp(&other.value)
+        Some(self.cmp(other))
     }
 }
 

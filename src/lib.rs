@@ -844,6 +844,13 @@ where
     }
 }
 
+unsafe impl<T, C> Send for Entry<'_, T, C>
+where
+    T: Sync,
+    C: cfg::Config,
+{
+}
+
 // === impl VacantEntry ===
 
 impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
