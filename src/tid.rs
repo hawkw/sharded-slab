@@ -29,12 +29,13 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-#[cfg(not(loom))]
+// Loom's AtomicUsize and Mutex are not const initializable yet.
+#[cfg(not(all(loom, any(test, feature = "loom"))))]
 static REGISTRY: Registry = Registry {
     next: AtomicUsize::new(0),
     free: Mutex::new(VecDeque::new()),
 };
-#[cfg(loom)]
+#[cfg(all(loom, any(test, feature = "loom")))]
 static REGISTRY: once_cell::sync::Lazy<Registry> = once_cell::sync::Lazy::new(|| Registry {
     next: AtomicUsize::new(0),
     free: Mutex::new(VecDeque::new()),
