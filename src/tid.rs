@@ -29,10 +29,16 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
+#[cfg(not(loom))]
 static REGISTRY: Registry = Registry {
     next: AtomicUsize::new(0),
     free: Mutex::new(VecDeque::new()),
 };
+#[cfg(loom)]
+static REGISTRY: once_cell::sync::Lazy<Registry> = once_cell::sync::Lazy::new(|| Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+});
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
