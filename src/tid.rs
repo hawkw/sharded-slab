@@ -7,7 +7,6 @@ use crate::{
     },
     Pack,
 };
-use once_cell::sync::Lazy;
 use std::{
     cell::{Cell, UnsafeCell},
     collections::VecDeque,
@@ -31,10 +30,10 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-static REGISTRY: Lazy<Registry> = Lazy::new(|| Registry {
+static REGISTRY: Registry = Registry {
     next: AtomicUsize::new(0),
     free: Mutex::new(VecDeque::new()),
-});
+};
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();

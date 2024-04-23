@@ -3,7 +3,7 @@ name = "sharded-slab"
 version = "0.1.4"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
 edition = "2021"
-rust_version = "1.56"
+rust_version = "1.68"
 documentation = "https://docs.rs/sharded-slab/0.1.4/sharded_slab"
 homepage = "https://github.com/hawkw/sharded-slab"
 repository = "https://github.com/hawkw/sharded-slab"
@@ -23,7 +23,6 @@ name = "bench"
 harness = false
 
 [dependencies]
-once_cell = "1.17"
 
 [dev-dependencies]
 loom = { version = "0.5", features = ["checkpoint"] }
