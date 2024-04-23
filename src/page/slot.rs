@@ -134,7 +134,7 @@ where
             let new_refs = refs.incr()?;
             match self.lifecycle.compare_exchange(
                 lifecycle,
-                new_refs.pack(current_gen.pack(state.pack(0))),
+                new_refs.pack(lifecycle),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -242,7 +242,7 @@ where
         let mut spin_exp = 0;
         let next_gen = gen.advance();
         loop {
-            let current_gen = Generation::from_packed(lifecycle);
+            let current_gen = LifecycleGen::from_packed(lifecycle).0;
             test_println!("-> release_with; lifecycle={:#x}; expected_gen={:?}; current_gen={:?}; next_gen={:?};",
                 lifecycle,
                 gen,
@@ -261,7 +261,7 @@ where
 
             match self.lifecycle.compare_exchange(
                 lifecycle,
-                next_gen.pack(lifecycle),
+                LifecycleGen(next_gen).pack(lifecycle),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -499,8 +499,9 @@ impl<T, C: cfg::Config> Slot<T, C> {
             // Are we the last guard, and is the slot marked for removal?
             let dropping = refs.value == 1 && state == State::Marked;
             let new_lifecycle = if dropping {
-                // If so, we want to advance the state to "removing"
-                gen.pack(State::Removing as usize)
+                // If so, we want to advance the state to "removing".
+                // Also, reset the ref count to 0.
+                LifecycleGen(gen).pack(State::Removing as usize)
             } else {
                 // Otherwise, just subtract 1 from the ref count.
                 refs.decr().pack(lifecycle)
@@ -571,7 +572,7 @@ impl<C: cfg::Config> Eq for Generation<C> {}
 
 impl<C: cfg::Config> PartialOrd for Generation<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.value.partial_cmp(&other.value)
+        Some(self.cmp(other))
     }
 }
 
@@ -583,7 +584,7 @@ impl<C: cfg::Config> Ord for Generation<C> {
 
 impl<C: cfg::Config> Clone for Generation<C> {
     fn clone(&self) -> Self {
-        Self::new(self.value)
+        *self
     }
 }
 
@@ -735,7 +736,7 @@ impl<C: cfg::Config> Eq for RefCount<C> {}
 
 impl<C: cfg::Config> PartialOrd for RefCount<C> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.value.partial_cmp(&other.value)
+        Some(self.cmp(other))
     }
 }
 
@@ -747,7 +748,7 @@ impl<C: cfg::Config> Ord for RefCount<C> {
 
 impl<C: cfg::Config> Clone for RefCount<C> {
     fn clone(&self) -> Self {
-        Self::from_usize(self.value)
+        *self
     }
 }
 
@@ -875,7 +876,8 @@ impl<T, C: cfg::Config> InitGuard<T, C> {
 
             debug_assert!(state == State::Marked || thread::panicking(), "state was not MARKED; someone else has removed the slot while we have exclusive access!\nactual={:?}", state);
             debug_assert!(refs.value == 0 || thread::panicking(), "ref count was not 0; someone else has referenced the slot while we have exclusive access!\nactual={:?}", refs);
-            let new_lifecycle = self.generation().pack(State::Removing as usize);
+
+            let new_lifecycle = LifecycleGen(self.generation()).pack(State::Removing as usize);
 
             match slot.lifecycle.compare_exchange(
                 curr_lifecycle,

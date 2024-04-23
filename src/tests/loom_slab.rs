@@ -381,7 +381,7 @@ fn remove_remote_during_insert() {
 #[test]
 fn unique_iter() {
     run_model("unique_iter", || {
-        let mut slab = std::sync::Arc::new(Slab::new());
+        let mut slab = Arc::new(Slab::new());
 
         let s = slab.clone();
         let t1 = thread::spawn(move || {
@@ -398,7 +398,7 @@ fn unique_iter() {
         t1.join().expect("thread 1 should not panic");
         t2.join().expect("thread 2 should not panic");
 
-        let slab = std::sync::Arc::get_mut(&mut slab).expect("other arcs should be dropped");
+        let slab = Arc::get_mut(&mut slab).expect("other arcs should be dropped");
         let items: Vec<_> = slab.unique_iter().map(|&i| i).collect();
         assert!(items.contains(&1), "items: {:?}", items);
         assert!(items.contains(&2), "items: {:?}", items);

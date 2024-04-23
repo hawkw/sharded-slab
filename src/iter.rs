@@ -1,15 +1,19 @@
-use crate::{page, shard};
-use std::slice;
+use std::{iter::FusedIterator, slice};
 
+use crate::{cfg, page, shard};
+
+/// An exclusive fused iterator over the items in a [`Slab`](crate::Slab).
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 #[derive(Debug)]
-pub struct UniqueIter<'a, T, C: crate::cfg::Config> {
+pub struct UniqueIter<'a, T, C: cfg::Config> {
     pub(super) shards: shard::IterMut<'a, Option<T>, C>,
     pub(super) pages: slice::Iter<'a, page::Shared<Option<T>, C>>,
     pub(super) slots: Option<page::Iter<'a, T, C>>,
 }
 
-impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
+impl<'a, T, C: cfg::Config> Iterator for UniqueIter<'a, T, C> {
     type Item = &'a T;
+
     fn next(&mut self) -> Option<Self::Item> {
         test_println!("UniqueIter::next");
         loop {
@@ -37,3 +41,5 @@ impl<'a, T, C: crate::cfg::Config> Iterator for UniqueIter<'a, T, C> {
         }
     }
 }
+
+impl<T, C: cfg::Config> FusedIterator for UniqueIter<'_, T, C> {}

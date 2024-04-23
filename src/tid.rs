@@ -12,7 +12,6 @@ use std::{
     collections::VecDeque,
     fmt,
     marker::PhantomData,
-    sync::PoisonError,
 };
 
 /// Uniquely identifies a thread.
@@ -121,7 +120,7 @@ impl<C> Eq for Tid<C> {}
 
 impl<C: cfg::Config> Clone for Tid<C> {
     fn clone(&self) -> Self {
-        Self::new(self.id)
+        *self
     }
 }
 
@@ -184,9 +183,26 @@ impl Registration {
 #[cfg(not(all(loom, any(feature = "loom", test))))]
 impl Drop for Registration {
     fn drop(&mut self) {
+        use std::sync::PoisonError;
+
         if let Some(id) = self.0.get() {
             let mut free_list = REGISTRY.free.lock().unwrap_or_else(PoisonError::into_inner);
             free_list.push_back(id);
         }
     }
+}
+
+#[cfg(all(test, not(loom)))]
+pub(crate) fn with<R>(tid: usize, f: impl FnOnce() -> R) -> R {
+    struct Guard(Option<usize>);
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            REGISTRATION.with(|r| r.0.set(self.0.take()));
+        }
+    }
+
+    let prev = REGISTRATION.with(|r| r.0.replace(Some(tid)));
+    let _guard = Guard(prev);
+    f()
 }

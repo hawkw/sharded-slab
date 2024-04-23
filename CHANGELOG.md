@@ -1,3 +1,38 @@
+<a name="v0.1.7"></a>
+### v0.1.7 (2023-10-04)
+
+
+#### Bug Fixes
+
+*   index out of bounds in `get()` and `get_owned()` (#88) ([fdbc930f](https://github.com/hawkw/sharded-slab/commit/fdbc930fb14b0f6f8b77cd6efdad5a1bdf8d3c04))
+* **unique_iter:**  prevent panics if a slab is empty (#88) ([bd599e0b](https://github.com/hawkw/sharded-slab/commit/bd599e0b2a60a953f25f27ba1fa86682150e05c2), closes [#73](https://github.com/hawkw/sharded-slab/issues/73))
+
+
+
+<a name="0.1.6"></a>
+## 0.1.6 (2023-09-27)
+
+
+#### Features
+
+*   publicly export `UniqueIter` (#87) ([e4d6482d](https://github.com/hawkw/sharded-slab/commit/e4d6482db05d5767b47eae1b0217faad30f2ebd5), closes [#77](https://github.com/hawkw/sharded-slab/issues/77))
+
+#### Bug Fixes
+
+*   use a smaller `CustomConfig` for 32-bit tests (#84) ([828ffff9](https://github.com/hawkw/sharded-slab/commit/828ffff9f82cfc41ed66b4743563c4dddc97c1ce), closes [#82](https://github.com/hawkw/sharded-slab/issues/82))
+
+
+
+<a name="0.1.5"></a>
+## 0.1.5 (2023-08-28)
+
+
+#### Bug Fixes
+
+* **Slab:**  invalid generation in case of custom config (#80) ([ca090279](https://github.com/hawkw/sharded-slab/commit/ca09027944812d024676029a3dde62d27ef22015))
+
+
+
 <a name="0.1.4"></a>
 ### 0.1.4 (2021-10-12)
 
