@@ -3,7 +3,7 @@ use crate::{
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local, Mutex,
     },
     Pack,
 };
@@ -29,12 +29,17 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
+// Loom's AtomicUsize and Mutex are not const initializable yet.
+#[cfg(not(all(loom, any(test, feature = "loom"))))]
+static REGISTRY: Registry = Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+};
+#[cfg(all(loom, any(test, feature = "loom")))]
+static REGISTRY: once_cell::sync::Lazy<Registry> = once_cell::sync::Lazy::new(|| Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+});
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
