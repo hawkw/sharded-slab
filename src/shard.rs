@@ -13,7 +13,7 @@ use crate::{
     Pack,
 };
 
-use std::{fmt, ptr, slice, iter};
+use std::{fmt, iter, ptr, slice};
 
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
@@ -438,10 +438,11 @@ where
     }
 }
 
-// IterMut is inherently fused since slice::IterMut implements FusedIterator, and our IterMut shall never produce 
+// IterMut is inherently fused since slice::IterMut implements FusedIterator, and our IterMut shall never produce
 // items after the wrapped iterator is exhaused (at least according to the above impl).
 impl<'a, T, C> iter::FusedIterator for IterMut<'a, T, C>
 where
     T: 'a,
     C: cfg::Config + 'a,
-{ }
+{
+}
