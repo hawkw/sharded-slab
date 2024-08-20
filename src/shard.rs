@@ -274,7 +274,7 @@ where
 
         // Use ptr::write_bytes to fill the Vec very fast.
         // Safety: This is safe because ptr::null() is defined as having an address of 0 in Rust, and being equivalent
-        // to `MaybeUninit::<*const T>::zeroed().assume_init()`, and the `AtomicPtr` that underlies our ptr type is 
+        // to `MaybeUninit::<*const T>::zeroed().assume_init()`, and the `AtomicPtr` that underlies our ptr type is
         // just an `UnsafeCell`, which is `#[repr(transparent)]`.
         unsafe {
             ptr::write_bytes::<Ptr<T, C>>(shards.as_mut_ptr(), 0, C::MAX_SHARDS);
