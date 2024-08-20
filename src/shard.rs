@@ -13,7 +13,7 @@ use crate::{
     Pack,
 };
 
-use std::{fmt, ptr, slice};
+use std::{fmt, ptr, slice, iter};
 
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
@@ -429,4 +429,19 @@ where
             }
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // The size of this iterator will never exceed the size of the wrapped iter according to the above `::next`
+        // impl.
+        self.0.size_hint()
+    }
 }
+
+// IterMut is inherently fused since slice::IterMut implements FusedIterator, and our IterMut shall never produce 
+// items after the wrapped iterator is exhaused (at least according to the above impl).
+impl<'a, T, C> iter::FusedIterator for IterMut<'a, T, C>
+where
+    T: 'a,
+    C: cfg::Config + 'a,
+{ }
