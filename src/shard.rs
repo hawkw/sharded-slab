@@ -271,12 +271,18 @@ where
 {
     pub(crate) fn new() -> Self {
         let mut shards = Vec::with_capacity(C::MAX_SHARDS);
-        for _ in 0..C::MAX_SHARDS {
-            // XXX(eliza): T_T this could be avoided with maybeuninit or something...
-            shards.push(Ptr::null());
+
+        // Use ptr::write_bytes to fill the Vec very fast.
+        // Safety: This is safe because ptr::null() is defined as having an address of 0 in Rust, and being equivalent
+        // to `MaybeUninit::<*const T>::zeroed().assume_init()`, and the `AtomicPtr` that underlies our ptr type is
+        // just an `UnsafeCell`, which is `#[repr(transparent)]`.
+        unsafe {
+            ptr::write_bytes::<Ptr<T, C>>(shards.as_mut_ptr(), 0, C::MAX_SHARDS);
+            shards.set_len(C::MAX_SHARDS);
         }
+
         Self {
-            shards: shards.into(),
+            shards: shards.into_boxed_slice(),
             max: AtomicUsize::new(0),
         }
     }
@@ -370,11 +376,6 @@ impl<T: fmt::Debug, C: cfg::Config> fmt::Debug for Array<T, C> {
 // === impl Ptr ===
 
 impl<T, C: cfg::Config> Ptr<T, C> {
-    #[inline]
-    fn null() -> Self {
-        Self(AtomicPtr::new(ptr::null_mut()))
-    }
-
     #[inline]
     fn load(&self, order: Ordering) -> Option<&Shard<T, C>> {
         let ptr = self.0.load(order);
