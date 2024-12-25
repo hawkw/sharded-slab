@@ -111,8 +111,9 @@
 //!
 //! # Comparison with Similar Crates
 //!
-//! - [`slab`]: Carl Lerche's `slab` crate provides a slab implementation with a
-//!   similar API, implemented by storing all data in a single vector.
+//! - [`slab`][slabcrate]: Carl Lerche's `slab` crate provides a slab implementation
+//!   with a similar API, implemented by storing all data in a single vector.
+//!
 //!
 //!   Unlike `sharded_slab`, inserting and removing elements from the slab
 //!   requires  mutable access. This means that if the slab is accessed
@@ -134,7 +135,7 @@
 //!   concurrent use-cases, while `slab` should be preferred in single-threaded
 //!   use-cases.
 //!
-//! [`slab`]: https://crates.io/crates/loom
+//! [slabcrate]: https://crates.io/crates/slab
 //!
 //! # Safety and Correctness
 //!
