@@ -190,6 +190,13 @@ where
         })
     }
 
+    #[inline]
+    #[cfg(not(loom))]
+    pub(crate) fn slot_mut(&mut self, addr: Addr<C>) -> Option<&mut Slot<T, C>> {
+        let poff = addr.offset() - self.prev_sz;
+        self.slab.get_mut().as_mut()?.get_mut(poff)
+    }
+
     #[inline(always)]
     pub(crate) fn free_list(&self) -> &impl FreeList<C> {
         &self.remote
