@@ -14,7 +14,7 @@ categories = ["memory-management", "data-structures", "concurrency"]
 description = """
 A lock-free concurrent slab.
 """
-ignore = [
+exclude = [
     "flake.nix",
     "flake.lock",
     ".envrc",
