@@ -783,7 +783,7 @@ unsafe impl<T: Sync, C: cfg::Config> Sync for Slab<T, C> {}
 
 // === impl Entry ===
 
-impl<'a, T, C: cfg::Config> Entry<'a, T, C> {
+impl<T, C: cfg::Config> Entry<'_, T, C> {
     /// Returns the key used to access the guard.
     pub fn key(&self) -> usize {
         self.key
@@ -800,7 +800,7 @@ impl<'a, T, C: cfg::Config> Entry<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for Entry<'a, T, C> {
+impl<T, C: cfg::Config> std::ops::Deref for Entry<'_, T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -808,7 +808,7 @@ impl<'a, T, C: cfg::Config> std::ops::Deref for Entry<'a, T, C> {
     }
 }
 
-impl<'a, T, C: cfg::Config> Drop for Entry<'a, T, C> {
+impl<T, C: cfg::Config> Drop for Entry<'_, T, C> {
     fn drop(&mut self) {
         let should_remove = unsafe {
             // Safety: calling `slot::Guard::release` is unsafe, since the
@@ -825,7 +825,7 @@ impl<'a, T, C: cfg::Config> Drop for Entry<'a, T, C> {
     }
 }
 
-impl<'a, T, C> fmt::Debug for Entry<'a, T, C>
+impl<T, C> fmt::Debug for Entry<'_, T, C>
 where
     T: fmt::Debug,
     C: cfg::Config,
@@ -835,7 +835,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for Entry<'a, T, C>
+impl<T, C> PartialEq<T> for Entry<'_, T, C>
 where
     T: PartialEq<T>,
     C: cfg::Config,
@@ -854,7 +854,7 @@ where
 
 // === impl VacantEntry ===
 
-impl<'a, T, C: cfg::Config> VacantEntry<'a, T, C> {
+impl<T, C: cfg::Config> VacantEntry<'_, T, C> {
     /// Insert a value in the entry.
     ///
     /// To get the integer index at which this value will be inserted, use
