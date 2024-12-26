@@ -870,7 +870,7 @@ where
 
 // === impl Ref ===
 
-impl<'a, T, C> Ref<'a, T, C>
+impl<T, C> Ref<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -893,7 +893,7 @@ where
     }
 }
 
-impl<'a, T, C> std::ops::Deref for Ref<'a, T, C>
+impl<T, C> std::ops::Deref for Ref<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -905,7 +905,7 @@ where
     }
 }
 
-impl<'a, T, C> Drop for Ref<'a, T, C>
+impl<T, C> Drop for Ref<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -927,7 +927,7 @@ where
     }
 }
 
-impl<'a, T, C> fmt::Debug for Ref<'a, T, C>
+impl<T, C> fmt::Debug for Ref<'_, T, C>
 where
     T: fmt::Debug + Clear + Default,
     C: cfg::Config,
@@ -937,7 +937,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for Ref<'a, T, C>
+impl<T, C> PartialEq<T> for Ref<'_, T, C>
 where
     T: PartialEq<T> + Clear + Default,
     C: cfg::Config,
@@ -1014,7 +1014,7 @@ where
     }
 }
 
-impl<'a, T, C: cfg::Config> std::ops::Deref for RefMut<'a, T, C>
+impl<T, C: cfg::Config> std::ops::Deref for RefMut<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -1026,7 +1026,7 @@ where
     }
 }
 
-impl<'a, T, C> std::ops::DerefMut for RefMut<'a, T, C>
+impl<T, C> std::ops::DerefMut for RefMut<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -1040,7 +1040,7 @@ where
     }
 }
 
-impl<'a, T, C> Drop for RefMut<'a, T, C>
+impl<T, C> Drop for RefMut<'_, T, C>
 where
     T: Clear + Default,
     C: cfg::Config,
@@ -1058,7 +1058,7 @@ where
     }
 }
 
-impl<'a, T, C> fmt::Debug for RefMut<'a, T, C>
+impl<T, C> fmt::Debug for RefMut<'_, T, C>
 where
     T: fmt::Debug + Clear + Default,
     C: cfg::Config,
@@ -1068,7 +1068,7 @@ where
     }
 }
 
-impl<'a, T, C> PartialEq<T> for RefMut<'a, T, C>
+impl<T, C> PartialEq<T> for RefMut<'_, T, C>
 where
     T: PartialEq<T> + Clear + Default,
     C: cfg::Config,
