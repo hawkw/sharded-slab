@@ -8,7 +8,7 @@ on:
 env:
   RUSTFLAGS: -Dwarnings
   RUST_BACKTRACE: 1
-  MSRV: 1.42.0
+  MSRV: 1.68.0
 
 jobs:
   build:
