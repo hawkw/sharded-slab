@@ -6,9 +6,7 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{
-        cell::UnsafeCell, hint, lazy_static, sync::Mutex, thread::yield_now, thread_local,
-    };
+    pub(crate) use loom::{cell::UnsafeCell, hint, sync::Mutex, thread::yield_now, thread_local};
 
     pub(crate) mod alloc {
         #![allow(dead_code)]
@@ -62,8 +60,6 @@ mod inner {
 
 #[cfg(not(all(loom, any(feature = "loom", test))))]
 mod inner {
-    #![allow(dead_code)]
-    pub(crate) use lazy_static::lazy_static;
     pub(crate) use std::{
         sync::{atomic, Mutex},
         thread::yield_now,
@@ -122,18 +118,6 @@ mod inner {
             #[inline(always)]
             pub fn get_ref(&self) -> &T {
                 &self.value
-            }
-
-            /// Get a mutable reference to the value
-            #[inline(always)]
-            pub fn get_mut(&mut self) -> &mut T {
-                &mut self.value
-            }
-
-            /// Stop tracking the value for leaks
-            #[inline(always)]
-            pub fn into_inner(self) -> T {
-                self.value
             }
         }
     }
