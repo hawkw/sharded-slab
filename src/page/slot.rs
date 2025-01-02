@@ -43,7 +43,7 @@ pub(crate) struct Lifecycle<C> {
     state: State,
     _cfg: PhantomData<fn(C)>,
 }
-struct LifecycleGen<C>(Generation<C>);
+pub(crate) struct LifecycleGen<C>(Generation<C>);
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[repr(usize)]
@@ -702,7 +702,7 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 }
 
 impl<C: cfg::Config> RefCount<C> {
-    pub(crate) const MAX: usize = Self::BITS - 1;
+    pub(crate) const MAX: usize = Self::BITS.saturating_sub(1);
 
     #[inline]
     fn incr(self) -> Option<Self> {

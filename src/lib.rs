@@ -1049,8 +1049,12 @@ pub(crate) trait Pack<C: cfg::Config>: Sized {
     ///
     /// This is computed automatically based on `Self::LEN`.
     const BITS: usize = {
-        let shift = 1 << (Self::LEN - 1);
-        shift | (shift - 1)
+        if Self::LEN == 0 {
+            0
+        } else {
+            let shift = 1 << (Self::LEN - 1);
+            shift | (shift - 1)
+        }
     };
     /// The number of bits to shift a number to pack it into a usize with other
     /// values.
