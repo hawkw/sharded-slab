@@ -226,7 +226,7 @@ pub use pool::Pool;
 
 pub(crate) use tid::Tid;
 
-use cfg::CfgPrivate;
+use cfg::{CfgPrivate, WIDTH};
 use shard::Shard;
 use std::{fmt, marker::PhantomData, ptr, sync::Arc};
 
@@ -1021,6 +1021,14 @@ where
 {
 }
 
+/// Generate bit mask with `len` 1 bits. (Rust 1.42.0 compatible)
+const fn ones(len: usize) -> usize {
+    let shr = WIDTH - len;
+    let first_shr = shr / 2;
+    // right shift in two passes to avoid overflow
+    0usize.wrapping_sub(1) >> first_shr >> (shr - first_shr)
+}
+
 // === pack ===
 
 pub(crate) trait Pack<C: cfg::Config>: Sized {
@@ -1048,10 +1056,8 @@ pub(crate) trait Pack<C: cfg::Config>: Sized {
     /// left by `Self::SHIFT` bits to calculate this type's `MASK`.
     ///
     /// This is computed automatically based on `Self::LEN`.
-    const BITS: usize = {
-        let shift = 1 << (Self::LEN - 1);
-        shift | (shift - 1)
-    };
+    const BITS: usize = ones(Self::LEN);
+
     /// The number of bits to shift a number to pack it into a usize with other
     /// values.
     ///

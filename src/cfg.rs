@@ -42,7 +42,7 @@ pub trait Config: Sized {
 pub(crate) trait CfgPrivate: Config {
     const USED_BITS: usize = Generation::<Self>::LEN + Generation::<Self>::SHIFT;
     const INITIAL_SZ: usize = next_pow2(Self::INITIAL_PAGE_SIZE);
-    const MAX_SHARDS: usize = next_pow2(Self::MAX_THREADS - 1);
+    const MAX_SHARDS: usize = next_pow2(Self::MAX_THREADS);
     const ADDR_INDEX_SHIFT: usize = Self::INITIAL_SZ.trailing_zeros() as usize + 1;
 
     fn page_size(n: usize) -> usize {
@@ -137,10 +137,10 @@ impl Config for DefaultConfig {
     const INITIAL_PAGE_SIZE: usize = 32;
 
     #[cfg(target_pointer_width = "64")]
-    const MAX_THREADS: usize = 4096;
+    const MAX_THREADS: usize = 8192;
     #[cfg(target_pointer_width = "32")]
     // TODO(eliza): can we find enough bits to give 32-bit platforms more threads?
-    const MAX_THREADS: usize = 128;
+    const MAX_THREADS: usize = 256;
 
     const MAX_PAGES: usize = WIDTH / 2;
 }
@@ -168,25 +168,91 @@ impl<C: Config> fmt::Debug for DebugConfig<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::page::slot::Lifecycle;
+    use crate::page::slot::LifecycleGen;
     use crate::test_util;
     use crate::Slab;
+    use crate::Tid;
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn default_config_stats() {
+        assert_eq!(DefaultConfig::MAX_PAGES, 16);
+        assert_eq!(DefaultConfig::MAX_SHARDS, 256);
+        assert_eq!(DefaultConfig::MAX_THREADS, 256);
+        assert_eq!(DefaultConfig::INITIAL_PAGE_SIZE, 32);
+        assert_eq!(DefaultConfig::INITIAL_SZ, 32);
+        assert_eq!(DefaultConfig::ADDR_INDEX_SHIFT, 6);
+        assert_eq!(DefaultConfig::USED_BITS, WIDTH);
+        assert_eq!(RefCount::<DefaultConfig>::LEN, 28);
+        assert_eq!(Lifecycle::<DefaultConfig>::LEN, 2);
+        assert_eq!(LifecycleGen::<DefaultConfig>::LEN, 2);
+        assert_eq!(Generation::<DefaultConfig>::LEN, 2);
+        assert_eq!(Tid::<DefaultConfig>::LEN, 8);
+        assert_eq!(Addr::<DefaultConfig>::LEN, 22);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn default_config_stats() {
+        assert_eq!(DefaultConfig::MAX_PAGES, 32);
+        assert_eq!(DefaultConfig::MAX_SHARDS, 8192);
+        assert_eq!(DefaultConfig::MAX_THREADS, 8192);
+        assert_eq!(DefaultConfig::INITIAL_PAGE_SIZE, 32);
+        assert_eq!(DefaultConfig::INITIAL_SZ, 32);
+        assert_eq!(DefaultConfig::ADDR_INDEX_SHIFT, 6);
+        assert_eq!(DefaultConfig::USED_BITS, WIDTH);
+        assert_eq!(RefCount::<DefaultConfig>::LEN, 49);
+        assert_eq!(Lifecycle::<DefaultConfig>::LEN, 2);
+        assert_eq!(LifecycleGen::<DefaultConfig>::LEN, 13);
+        assert_eq!(Generation::<DefaultConfig>::LEN, 13);
+        assert_eq!(Tid::<DefaultConfig>::LEN, 13);
+        assert_eq!(Addr::<DefaultConfig>::LEN, 38);
+    }
+
+    struct GiantGenConfig;
+
+    impl Config for GiantGenConfig {
+        const INITIAL_PAGE_SIZE: usize = 1;
+        const MAX_THREADS: usize = 1;
+        const MAX_PAGES: usize = 1;
+    }
 
     #[test]
     #[cfg_attr(loom, ignore)]
     #[should_panic]
     fn validates_max_refs() {
-        struct GiantGenConfig;
-
         // Configure the slab with a very large number of bits for the generation
         // counter. This will only leave 1 bit to use for the slot reference
         // counter, which will fail to validate.
-        impl Config for GiantGenConfig {
-            const INITIAL_PAGE_SIZE: usize = 1;
-            const MAX_THREADS: usize = 1;
-            const MAX_PAGES: usize = 1;
-        }
 
         let _slab = Slab::<usize>::new_with_config::<GiantGenConfig>();
+    }
+
+    #[test]
+    fn giant_gen_config_stats() {
+        assert_eq!(GiantGenConfig::MAX_PAGES, 1);
+        assert_eq!(GiantGenConfig::MAX_SHARDS, 1);
+        assert_eq!(GiantGenConfig::MAX_THREADS, 1);
+        assert_eq!(GiantGenConfig::INITIAL_PAGE_SIZE, 1);
+        assert_eq!(GiantGenConfig::USED_BITS, WIDTH);
+        assert_eq!(GiantGenConfig::INITIAL_SZ, 1);
+        assert_eq!(GiantGenConfig::ADDR_INDEX_SHIFT, 1);
+        assert_eq!(RefCount::<GiantGenConfig>::LEN, 0);
+        assert_eq!(
+            LifecycleGen::<GiantGenConfig>::LEN,
+            WIDTH - RefCount::<GiantGenConfig>::LEN - Lifecycle::<GiantGenConfig>::LEN
+        );
+        assert_eq!(Lifecycle::<GiantGenConfig>::LEN, 2);
+        assert_eq!(
+            Generation::<GiantGenConfig>::LEN,
+            WIDTH
+                - GiantGenConfig::RESERVED_BITS
+                - Tid::<GiantGenConfig>::LEN
+                - Addr::<GiantGenConfig>::LEN
+        );
+        assert_eq!(Tid::<GiantGenConfig>::LEN, 0);
+        assert_eq!(Addr::<GiantGenConfig>::LEN, 2);
     }
 
     #[test]
