@@ -702,7 +702,10 @@ impl<C: cfg::Config> Pack<C> for RefCount<C> {
 }
 
 impl<C: cfg::Config> RefCount<C> {
-    pub(crate) const MAX: usize = Self::BITS.saturating_sub(1);
+    // Basically `Self::BITS.saturaing_sub(1)`, but Rust 1.42.0 compatible.
+    //
+    // Inspired by https://stackoverflow.com/a/53646925/8735881
+    pub(crate) const MAX: usize = [Self::BITS, 1][(Self::BITS < 1) as usize] - 1;
 
     #[inline]
     fn incr(self) -> Option<Self> {
