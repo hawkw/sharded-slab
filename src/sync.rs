@@ -7,7 +7,7 @@ mod inner {
         pub use std::sync::atomic::Ordering;
     }
     pub(crate) use loom::{
-        cell::UnsafeCell, hint, lazy_static, sync::Mutex, thread::yield_now, thread_local,
+        cell::UnsafeCell, hint, sync::Mutex, thread::yield_now, thread_local,
     };
 
     pub(crate) mod alloc {
@@ -63,7 +63,6 @@ mod inner {
 #[cfg(not(all(loom, any(feature = "loom", test))))]
 mod inner {
     #![allow(dead_code)]
-    pub(crate) use lazy_static::lazy_static;
     pub(crate) use std::{
         sync::{atomic, Mutex},
         thread::yield_now,
