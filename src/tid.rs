@@ -11,7 +11,8 @@ use std::{
     cell::{Cell, UnsafeCell},
     collections::VecDeque,
     fmt,
-    marker::PhantomData, sync::LazyLock,
+    marker::PhantomData,
+    sync::LazyLock,
 };
 
 /// Uniquely identifies a thread.
