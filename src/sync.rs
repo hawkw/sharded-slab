@@ -6,9 +6,7 @@ mod inner {
         pub use loom::sync::atomic::*;
         pub use std::sync::atomic::Ordering;
     }
-    pub(crate) use loom::{
-        cell::UnsafeCell, hint, sync::Mutex, thread::yield_now, thread_local,
-    };
+    pub(crate) use loom::{cell::UnsafeCell, hint, sync::Mutex, thread::yield_now, thread_local};
 
     pub(crate) mod alloc {
         #![allow(dead_code)]
