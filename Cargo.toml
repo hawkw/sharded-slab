@@ -14,16 +14,7 @@ categories = ["memory-management", "data-structures", "concurrency"]
 description = """
 A lock-free concurrent slab.
 """
-exclude = [
-    "flake.nix",
-    "flake.lock",
-    ".envrc",
-    ".clog.toml",
-    ".cargo",
-    ".github",
-    ".direnv",
-    "bin",
-]
+include = ["CHANGELOG.md", "Cargo.toml", "LICENSE", "README.md", "src/**/*.rs"]
 
 [badges]
 maintenance = { status = "experimental" }
