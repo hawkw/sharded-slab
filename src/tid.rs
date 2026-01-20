@@ -3,7 +3,7 @@ use crate::{
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local, Mutex,
     },
     Pack,
 };
@@ -12,6 +12,7 @@ use std::{
     collections::VecDeque,
     fmt,
     marker::PhantomData,
+    sync::LazyLock,
 };
 
 /// Uniquely identifies a thread.
@@ -29,12 +30,10 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
+static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+});
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
@@ -86,7 +85,7 @@ impl<C> Tid<C> {
     #[cold]
     fn poisoned() -> Self {
         Self {
-            id: std::usize::MAX,
+            id: usize::MAX,
             _not_send: PhantomData,
             _cfg: PhantomData,
         }
@@ -94,7 +93,7 @@ impl<C> Tid<C> {
 
     /// Returns true if the local thread ID was accessed while unwinding.
     pub(crate) fn is_poisoned(&self) -> bool {
-        self.id == std::usize::MAX
+        self.id == usize::MAX
     }
 }
 
