@@ -15,6 +15,9 @@ use crate::{
 
 use std::{fmt, ptr, slice};
 
+#[cfg(not(loom))]
+use std::ptr::NonNull;
+
 // ┌─────────────┐      ┌────────┐
 // │ page 1      │      │        │
 // ├─────────────┤ ┌───▶│  next──┼─┐
@@ -82,6 +85,15 @@ where
         }
 
         self.shared[page_index].with_slot(addr, f)
+    }
+
+    #[inline(always)]
+    #[cfg(not(loom))]
+    pub(crate) fn slot_mut(&mut self, idx: usize) -> Option<&mut page::Slot<T, C>> {
+        let (addr, page_index) = page::indices::<C>(idx);
+        self.shared
+            .get_mut(page_index)
+            .and_then(|page| page.slot_mut(addr))
     }
 
     pub(crate) fn new(tid: usize) -> Self {
@@ -288,6 +300,12 @@ where
     }
 
     #[inline]
+    #[cfg(not(loom))]
+    pub(crate) fn get_mut(&mut self, idx: usize) -> Option<&mut Shard<T, C>> {
+        self.shards.get_mut(idx)?.get_mut()
+    }
+
+    #[inline]
     pub(crate) fn current(&self) -> (Tid<C>, &Shard<T, C>) {
         let tid = Tid::<C>::current();
         test_println!("current: {:?}", tid);
@@ -396,6 +414,13 @@ impl<T, C: cfg::Config> Ptr<T, C> {
         };
 
         Some(track.get_ref())
+    }
+
+    #[inline]
+    #[cfg(not(loom))]
+    fn get_mut(&mut self) -> Option<&mut Shard<T, C>> {
+        // MSRV: We could do `track.as_mut()`, but the current MSRV doesn't have NLL
+        NonNull::new(*self.0.get_mut()).map(|track| unsafe { &mut *track.as_ptr() }.get_mut())
     }
 
     #[inline]

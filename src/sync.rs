@@ -102,6 +102,14 @@ mod inner {
         {
             f(self.0.get())
         }
+
+        #[inline(always)]
+        #[cfg(not(loom))]
+        pub fn get_mut(&mut self) -> &mut T {
+            // Safety: same as `std::UnsafeCell::get_mut`
+            // MSRV: `std::UnsafeCell::get_mut` stabilized in 1.50.0
+            unsafe { &mut *self.0.get() }
+        }
     }
 
     pub(crate) mod alloc {

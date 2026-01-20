@@ -623,6 +623,34 @@ impl<T, C: cfg::Config> Slab<T, C> {
         })
     }
 
+    /// Return a mutable reference to the value associated with the given key.
+    ///
+    /// This call borrows `self` mutably (at compile-time) which guarantees that we
+    /// possess the only reference.
+    ///
+    /// If the slab does not contain a value for the given key, `None` is returned
+    /// instead.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut slab = sharded_slab::Slab::new();
+    /// let key = slab.insert(String::from("hello world")).unwrap();
+    /// slab.get_mut(key).unwrap().push('!');
+    ///
+    /// assert_eq!(*slab.get_mut(key).unwrap(), "hello world!");
+    /// assert!(slab.get_mut(12345).is_none());
+    /// ```
+    #[cfg(not(loom))]
+    pub fn get_mut(&mut self, key: usize) -> Option<&mut T> {
+        let tid = C::unpack_tid(key);
+
+        let shard = self.shards.get_mut(tid.as_usize())?;
+        shard
+            .slot_mut(key)
+            .map(|slot| slot.value_mut().as_mut().unwrap())
+    }
+
     /// Return an owned reference to the value at the given index.
     ///
     /// If the slab does not contain a value for the given key, `None` is

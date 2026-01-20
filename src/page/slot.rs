@@ -97,6 +97,12 @@ where
     }
 
     #[inline(always)]
+    #[cfg(not(loom))]
+    pub(crate) fn value_mut(&mut self) -> &mut T {
+        self.item.get_mut()
+    }
+
+    #[inline(always)]
     pub(super) fn set_next(&self, next: usize) {
         self.next.with_mut(|n| unsafe {
             (*n) = next;
