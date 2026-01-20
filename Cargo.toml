@@ -32,9 +32,6 @@ maintenance = { status = "experimental" }
 name = "bench"
 harness = false
 
-[dependencies]
-lazy_static = "1"
-
 [dev-dependencies]
 proptest = "1"
 criterion = "0.3"

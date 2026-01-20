@@ -1,9 +1,11 @@
+use std::sync::LazyLock;
+
 use crate::{
     cfg::{self, CfgPrivate},
     page,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        lazy_static, thread_local, Mutex,
+        thread_local, Mutex,
     },
     Pack,
 };
@@ -29,12 +31,10 @@ struct Registry {
     free: Mutex<VecDeque<usize>>,
 }
 
-lazy_static! {
-    static ref REGISTRY: Registry = Registry {
-        next: AtomicUsize::new(0),
-        free: Mutex::new(VecDeque::new()),
-    };
-}
+static REGISTRY: LazyLock<Registry> = LazyLock::new(|| Registry {
+    next: AtomicUsize::new(0),
+    free: Mutex::new(VecDeque::new()),
+});
 
 thread_local! {
     static REGISTRATION: Registration = Registration::new();
