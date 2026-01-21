@@ -86,7 +86,7 @@ impl<C> Tid<C> {
     #[cold]
     fn poisoned() -> Self {
         Self {
-            id: std::usize::MAX,
+            id: usize::MAX,
             _not_send: PhantomData,
             _cfg: PhantomData,
         }
@@ -94,7 +94,7 @@ impl<C> Tid<C> {
 
     /// Returns true if the local thread ID was accessed while unwinding.
     pub(crate) fn is_poisoned(&self) -> bool {
-        self.id == std::usize::MAX
+        self.id == usize::MAX
     }
 }
 
