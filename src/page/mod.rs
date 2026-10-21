@@ -1,6 +1,9 @@
 use crate::cfg::{self, CfgPrivate};
 use crate::clear::Clear;
-use crate::sync::UnsafeCell;
+use crate::sync::{
+    atomic::{AtomicBool, Ordering},
+    UnsafeCell,
+};
 use crate::Pack;
 
 pub(crate) mod slot;
@@ -86,6 +89,10 @@ pub(crate) struct Shared<T, C> {
     size: usize,
     prev_sz: usize,
     slab: UnsafeCell<Option<Slots<T, C>>>,
+    /// Set (with `Release`) once `slab` has been allocated. Any thread other
+    /// than the owner may look up an index on this page, so it must observe
+    /// this flag (with `Acquire`) before it touches `slab`.
+    allocated: AtomicBool,
 }
 
 type Slots<T, C> = Box<[Slot<T, C>]>;
@@ -129,6 +136,7 @@ where
             size,
             remote: stack::TransferStack::new(),
             slab: UnsafeCell::new(None),
+            allocated: AtomicBool::new(false),
         }
     }
 
@@ -171,7 +179,7 @@ where
     /// otherwise.
     #[inline]
     fn is_unallocated(&self) -> bool {
-        self.slab.with(|s| unsafe { (*s).is_none() })
+        !self.allocated.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -184,6 +192,9 @@ where
 
         test_println!("-> offset {:?}", poff);
 
+        if self.is_unallocated() {
+            return None;
+        }
         self.slab.with(|slab| {
             let slot = unsafe { &*slab }.as_ref()?.get(poff)?;
             f(slot)
@@ -200,6 +211,7 @@ impl<'a, T, C> Shared<Option<T>, C>
 where
     C: cfg::Config + 'a,
 {
+    #[inline]
     pub(crate) fn take<F>(
         &self,
         addr: Addr<C>,
@@ -213,6 +225,9 @@ where
 
         test_println!("-> take: offset {:?}", offset);
 
+        if self.is_unallocated() {
+            return None;
+        }
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref()?;
             let slot = slab.get(offset)?;
@@ -220,6 +235,7 @@ where
         })
     }
 
+    #[inline]
     pub(crate) fn remove<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
@@ -230,6 +246,9 @@ where
 
         test_println!("-> offset {:?}", offset);
 
+        if self.is_unallocated() {
+            return false;
+        }
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
@@ -247,6 +266,9 @@ where
     }
 
     pub(crate) fn iter(&self) -> Option<Iter<'a, T, C>> {
+        if self.is_unallocated() {
+            return None;
+        }
         let slab = self.slab.with(|slab| unsafe { (*slab).as_ref() });
         slab.map(|slab| {
             slab.iter()
@@ -260,6 +282,7 @@ where
     T: Clear + Default,
     C: cfg::Config,
 {
+    #[inline]
     pub(crate) fn init_with<U>(
         &self,
         local: &Local,
@@ -299,14 +322,16 @@ where
         slab.push(Slot::new(Self::NULL));
         self.slab.with_mut(|s| {
             // safety: this mut access is safe — it only occurs to initially allocate the page,
-            // which only happens on this thread; if the page has not yet been allocated, other
-            // threads will not try to access it yet.
+            // which only happens on this thread; other threads check `allocated` before
+            // accessing `slab`, and it is not set until after this write.
             unsafe {
                 *s = Some(slab.into_boxed_slice());
             }
         });
+        self.allocated.store(true, Ordering::Release);
     }
 
+    #[inline]
     pub(crate) fn mark_clear<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
@@ -317,6 +342,9 @@ where
 
         test_println!("-> offset {:?}", offset);
 
+        if self.is_unallocated() {
+            return false;
+        }
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
@@ -327,6 +355,7 @@ where
         })
     }
 
+    #[inline]
     pub(crate) fn clear<F: FreeList<C>>(
         &self,
         addr: Addr<C>,
@@ -337,6 +366,9 @@ where
 
         test_println!("-> offset {:?}", offset);
 
+        if self.is_unallocated() {
+            return false;
+        }
         self.slab.with(|slab| {
             let slab = unsafe { &*slab }.as_ref();
             if let Some(slot) = slab.and_then(|slab| slab.get(offset)) {
